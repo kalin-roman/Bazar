@@ -1,6 +1,7 @@
 {
   "expo": {
     "name": "MarketPlace",
+    "scheme": "MarketPlace",
     "slug": "MarketPlace",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -24,7 +25,11 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "plugins": [
+      "expo-router"
+    ]
   }
 }
