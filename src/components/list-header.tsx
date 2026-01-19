@@ -1,9 +1,14 @@
 import { FontAwesome } from "@expo/vector-icons";
 import { Link } from "expo-router";
+
 import { FlatList,TouchableOpacity ,Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { CATEGORIES } from "../../assets/categories";
+import { useCartStore } from "../store/cart-store";
 
 export const ListHeader = () => {
+
+    const { getItemCount } = useCartStore(); 
+
     return (
         <View style={[styles.headerContainer]}>
             <View style={styles.headerTop}>
@@ -24,11 +29,11 @@ export const ListHeader = () => {
                                     <FontAwesome
                                     name="shopping-cart" 
                                     size={25} 
-                                    color="#1BC464" 
-                                    style={{ opacity: pressed ? 0.5 : 1 }}
+                                    color="grey" 
+                                    style={{ marginRight:15, opacity: pressed ? 0.5 : 1 }}
                                     />
                                     <View style={styles.badgeContainer}>
-                                        <Text style={styles.badgeText}>{1}</Text>
+                                        <Text style={styles.badgeText}>{getItemCount()}</Text>
                                     </View>
                                 </View>
                             )}

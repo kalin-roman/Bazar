@@ -1,49 +1,62 @@
-import { Tabs } from "expo-router";
+import { Redirect, Tabs } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StyleSheet } from "react-native";
+import { StyleSheet, ActivityIndicator } from "react-native";
 import { FontAwesome } from "@expo/vector-icons";
+import { useAuth } from "../../provider/auth-provider";
 
-function TabBarIcon(props :{
-  name: React.ComponentProps<typeof FontAwesome>['name'],
-  color: string
+function TabBarIcon(props: {
+  name: React.ComponentProps<typeof FontAwesome>["name"];
+  color: string;
 }) {
-  return <FontAwesome size={24} {...props} style={{color : '#1BC464'}} />;
+  return <FontAwesome size={24} {...props} style={{ color: "#1BC464" }} />;
 }
 
-
 const Tabslayout = () => {
+  const { session, mounting, user } = useAuth(); // TODO: use auth context here
+
+  if (mounting) return <ActivityIndicator />;
+
+  if (!session) return <Redirect href="/auth" />;
+
   return (
-    <SafeAreaView edges={['top']} style={styles.safeArea}>
-      <Tabs screenOptions={{
-        tabBarActiveTintColor: "#1BC464",
-        tabBarInactiveTintColor: "gray",
-        tabBarLabelStyle: { fontSize: 16 },
-        tabBarStyle: { 
-          borderTopLeftRadius: 20,
-          borderTopRightRadius: 20,
-          paddingBottom: 10, 
-        },
-        headerShown: false,
-      }}>
-        <Tabs.Screen name="index" options={{ 
-          title: "Shop",
-          tabBarIcon(props) {
-            return <TabBarIcon {...props} name='shopping-cart' />;
+    <SafeAreaView edges={["top"]} style={styles.safeArea}>
+      <Tabs
+        screenOptions={{
+          tabBarActiveTintColor: "#1BC464",
+          tabBarInactiveTintColor: "gray",
+          tabBarLabelStyle: { fontSize: 16 },
+          tabBarStyle: {
+            borderTopLeftRadius: 20,
+            borderTopRightRadius: 20,
+            paddingBottom: 10,
           },
-        }} />
-        <Tabs.Screen name="orders" options={{
-          title: "Orders",
-          tabBarIcon(props) {
-            return <TabBarIcon {...props} name='book' />;
-          }
-        }} />
+          headerShown: false,
+        }}
+      >
+        <Tabs.Screen
+          name="index"
+          options={{
+            title: "Shop",
+            tabBarIcon(props) {
+              return <TabBarIcon {...props} name="shopping-cart" />;
+            },
+          }}
+        />
+        <Tabs.Screen
+          name="orders"
+          options={{
+            title: "Orders",
+            tabBarIcon(props) {
+              return <TabBarIcon {...props} name="book" />;
+            },
+          }}
+        />
       </Tabs>
     </SafeAreaView>
   );
 };
 
 export default Tabslayout;
-
 
 const styles = StyleSheet.create({
   safeArea: {
