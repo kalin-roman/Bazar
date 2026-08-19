@@ -4,10 +4,12 @@ import { Link } from "expo-router";
 import { FlatList,TouchableOpacity ,Image, Pressable, StyleSheet, Text, View } from "react-native";
 import { CATEGORIES } from "../../assets/categories";
 import { useCartStore } from "../store/cart-store";
+import { useAuth } from "../provider/auth-provider";
 
 export const ListHeader = () => {
 
-    const { getItemCount } = useCartStore(); 
+    const { getItemCount } = useCartStore();
+    const { user, signOut } = useAuth();
 
     return (
         <View style={[styles.headerContainer]}>
@@ -18,7 +20,7 @@ export const ListHeader = () => {
                             source={{ uri: 'https://placehold.co/40.png' }}
                             style={styles.avatarImage}
                         />
-                        <Text style={styles.avatarText}>Hello codewit</Text>
+                        <Text style={styles.avatarText}>Hello {user?.name ?? "there"}</Text>
                     </View>
                 </View>
                 <View style={styles.headerRight}>
@@ -39,7 +41,7 @@ export const ListHeader = () => {
                             )}
                         </Pressable>
                     </Link>
-                    <TouchableOpacity style={styles.signOutButton} onPress={() => {}}>
+                    <TouchableOpacity style={styles.signOutButton} onPress={() => signOut()}>
                         <FontAwesome name="sign-out" size={25} color="red" />
                     </TouchableOpacity>
                 </View>

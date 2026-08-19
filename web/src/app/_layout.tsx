@@ -1,6 +1,5 @@
 import { Stack } from "expo-router";
 import { Toast, ToastProvider } from "react-native-toast-notifications";
-import Auth from "./auth";
 import AuthProvider from "../provider/auth-provider";
 
 export default function RootLayout() {
@@ -24,6 +23,10 @@ export default function RootLayout() {
           <Stack.Screen
             name="cart"
             options={{ presentation: "modal", headerTitle: "Shopping Cart" }}
+          />
+          <Stack.Screen
+            name="order-confirmation"
+            options={{ headerTitle: "Order Confirmed" }}
           />
           <Stack.Screen name="auth" options={{ headerShown: false }} />
         </Stack>

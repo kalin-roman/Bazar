@@ -3,13 +3,16 @@ import {
   View,
   Text,
   StyleSheet,
-  Alert,
   Platform,
   TouchableOpacity,
   FlatList,
 } from "react-native";
 import { useCartStore } from "../store/cart-store";
+import { useOrdersStore } from "../store/orders-store";
+import { PRODUCTS } from "../../assets/products";
+import { Order } from "../../assets/types/order";
 import { StatusBar } from "expo-status-bar";
+import { useRouter } from "expo-router";
 
 type CartItemType = {
   id: number;
@@ -66,15 +69,37 @@ const CartItem = ({
 };
 
 export default function Cart() {
-  const { items, removeItem, decrementItem, incrementItem, getTotalPrice } =
+  const { items, removeItem, decrementItem, incrementItem, getTotalPrice, clearCart } =
     useCartStore();
+  const { addOrder } = useOrdersStore();
+  const router = useRouter();
 
   const handleCheckout = () => {
-    // Implement checkout logic here
-    Alert.alert(
-      "Proceeding to checkout with items in cart.",
-      `Total Price: $${getTotalPrice()}`
-    );
+    if (items.length === 0) return;
+
+    const orderItems = items
+      .map((cartItem) => {
+        const product = PRODUCTS.find((p) => p.id === cartItem.id);
+        if (!product) return null;
+        return { product, quantity: cartItem.quantity };
+      })
+      .filter((item): item is { product: (typeof PRODUCTS)[number]; quantity: number } => item !== null);
+
+    const totalPrice = getTotalPrice();
+    const id = Date.now().toString();
+    const newOrder: Order = {
+      id,
+      slug: `order-${id}`,
+      item: `Order #${id}`,
+      details: `${items.length} item(s) — $${totalPrice}`,
+      status: "Pending",
+      date: new Date().toISOString().split("T")[0],
+      items: orderItems,
+    };
+
+    addOrder(newOrder);
+    clearCart();
+    router.replace({ pathname: "/order-confirmation", params: { slug: newOrder.slug } });
   };
 
   return (

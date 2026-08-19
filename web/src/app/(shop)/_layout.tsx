@@ -1,6 +1,6 @@
 import { Redirect, Tabs } from "expo-router";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { StyleSheet, ActivityIndicator } from "react-native";
+import { StyleSheet } from "react-native";
 import { FontAwesome } from "@expo/vector-icons";
 import { useAuth } from "../../provider/auth-provider";
 
@@ -12,10 +12,9 @@ function TabBarIcon(props: {
 }
 
 const Tabslayout = () => {
-  const { session, mounting, user } = useAuth(); // TODO: use auth context here
+  const { session, mounting } = useAuth();
 
-  if (mounting) return <ActivityIndicator />;
-
+  if (mounting) return null;
   if (!session) return <Redirect href="/auth" />;
 
   return (

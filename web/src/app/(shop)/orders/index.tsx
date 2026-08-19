@@ -7,9 +7,9 @@ import {
   Pressable,
 } from "react-native";
 
-import { ORDERS } from "../../../../assets/orders";
 import { Order, OrderStatus } from "../../../../assets/types/order";
 import { Link, Stack } from "expo-router";
+import { useOrdersStore } from "../../../store/orders-store";
 
 const statusDisplayText: Record<OrderStatus, string> = {
   Pending: "Pending",
@@ -41,11 +41,13 @@ const renderItemi: ListRenderItem<Order> = ({ item }) => (
 );
 
 const Orders = (props: OrdersProps) => {
+  const { orders } = useOrdersStore();
+
   return (
     <View style={styles.container}>
       <Stack.Screen options={{ title: "Orders" }} />
       <FlatList
-        data={ORDERS}
+        data={orders}
         keyExtractor={(item) => item.id.toString()}
         renderItem={renderItemi}
       />

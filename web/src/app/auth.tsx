@@ -11,8 +11,8 @@ import {
 import { useForm, Controller } from "react-hook-form";
 import * as zod from "zod";
 import { zodResolver } from "@hookform/resolvers/zod";
-import { Stack } from "expo-router";
-import { supabase } from "../lib/supabase";
+import { Stack, useRouter } from "expo-router";
+import { useAuth } from "../provider/auth-provider";
 import { Toast } from "react-native-toast-notifications";
 
 const authSchema = zod.object({
@@ -30,34 +30,38 @@ export default function Auth() {
       password: "",
     },
   });
+  const { signIn: authSignIn, signUp: authSignUp } = useAuth();
+  const router = useRouter();
 
   const signIn = async (data: zod.infer<typeof authSchema>) => {
-    const { error } = await supabase.auth.signInWithPassword(data);
+    const { error } = await authSignIn(data.email, data.password);
 
     if (error) {
-      alert(error.message);
+      alert(error);
     } else {
-      Toast.show("Successfully signed in!", { 
-        duration: 1500, 
-        type: "success",  
-        placement: "top"  
+      Toast.show("Successfully signed in!", {
+        duration: 1500,
+        type: "success",
+        placement: "top"
       });
+      router.replace("/");
     }
 
   };
 
   const signUp = async (data: zod.infer<typeof authSchema>) => {
-    const { error } = await supabase.auth.signUp(data);
+    const { error } = await authSignUp(data.email, data.password);
 
      if (error) {
-      alert(error.message);
+      alert(error);
     } else {
-      Toast.show("Successfully signed up!", { 
-        duration: 1500, 
-        type: "success",  
-        placement: "top"  
+      Toast.show("Successfully signed up!", {
+        duration: 1500,
+        type: "success",
+        placement: "top"
       });
-    }   
+      router.replace("/");
+    }
   };
 
   return (

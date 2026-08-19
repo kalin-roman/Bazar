@@ -1,12 +1,13 @@
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
 import {FlatList, StyleSheet, Text, View, Image} from "react-native";
-import { ORDERS } from "../../../../assets/orders";
+import { useOrdersStore } from "../../../store/orders-store";
 
 const OrderDetails = () => {
 
     const {slug} = useLocalSearchParams();
 
-    const order = ORDERS.find(order=> order.slug === slug);
+    const { orders } = useOrdersStore();
+    const order = orders.find(order=> order.slug === slug);
     
     if (!order) {
         return (
@@ -25,13 +26,14 @@ const OrderDetails = () => {
             <Text style={styles.itemsTitle}>Items Order:</Text>
             <FlatList
                 data={order.items}
-                keyExtractor={(item) => item.id.toString()}
+                keyExtractor={(item) => item.product.id.toString()}
                 renderItem={({ item }) => (
                     <View style={styles.orderItem}>
-                        <Image source={item.heroImage} style={styles.heroImage} />
+                        <Image source={item.product.heroImage} style={styles.heroImage} />
                         <View style={styles.itemInfo}>
-                            <Text style={styles.itemName}>{item.title}</Text>
-                            <Text style={styles.itemPrice}>${item.price.toFixed(2)}</Text>
+                            <Text style={styles.itemName}>{item.product.title}</Text>
+                            <Text style={styles.itemPrice}>${item.product.price.toFixed(2)} x {item.quantity}</Text>
+                            <Text style={styles.itemSubtotal}>${(item.product.price * item.quantity).toFixed(2)}</Text>
                         </View>
                     </View>
                 )}
@@ -109,6 +111,11 @@ const styles: { [key: string]: any } = StyleSheet.create({
   },
   itemPrice: {
     fontSize: 14,
+    marginTop: 4,
+  },
+  itemSubtotal: {
+    fontSize: 14,
+    fontWeight: 'bold',
     marginTop: 4,
   },
 });

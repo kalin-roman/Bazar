@@ -2,6 +2,11 @@ import { Product } from './product';
 
 export type OrderStatus = 'Pending' | 'Completed' | 'Shipped' | 'InTransit';
 
+export type OrderItem = {
+  product: Product;
+  quantity: number;
+};
+
 export type Order = {
   id: string;
   slug: string;
@@ -9,5 +14,5 @@ export type Order = {
   details: string;
   status: OrderStatus;
   date: string;
-  items: Product[];
+  items: OrderItem[];
 };
