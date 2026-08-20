@@ -1,0 +1,13 @@
+{
+  "id": "session-1786631894215",
+  "startedAt": "2026-08-13T14:38:14.215Z",
+  "cwd": "/home/roman-kalin/Project/Bazar/Bazar",
+  "context": {},
+  "metrics": {
+    "edits": 80,
+    "commands": 0,
+    "tasks": 0,
+    "errors": 0
+  },
+  "restoredAt": "2026-08-16T23:53:38.758Z"
+}

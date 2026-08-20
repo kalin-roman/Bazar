@@ -42,8 +42,8 @@ From the project's approved plan, roughly in order:
 1. Module basics + why `internal/` is special — **done**
 2. Domain types (plain structs, no framework annotations) — **done**
    (`Listing`, `Category`; `Order`/`User` domain types not started yet)
-3. `Repository`/`Service` interface pattern — **in progress**
-4. Table-driven unit tests against an in-memory fake repository — not started
+3. `Repository`/`Service` interface pattern — **done**
+4. Table-driven unit tests against an in-memory fake repository — **in progress**
 5. `pgx` + `golang-migrate` for real persistence — not started
 6. Stdlib `net/http` (Go 1.22 pattern routing) + hand-rolled middleware — not started
 7. `internal/auth` — verifying Supabase JWTs — not started
@@ -101,59 +101,88 @@ rounding; Go initialism casing (`ID`, `URL`, not `Id`, `Url`); a
 one-directional (`Listing.CategoryID` → `Category.ID`), avoiding a
 "god struct" / stale embedded data.
 
-### 🔧 Lesson 3 — Repository/Service pattern (IN PROGRESS)
+### ✅ Lesson 3 — Repository/Service pattern
 
-Working file: `internal/listing/service.go`.
-
-Concepts covered so far: interfaces in Go are implicit/structural (no
-`implements` keyword); the *consumer* defines the interface it needs
-(`Repository` lives in `listing`, even before any implementation
-exists); `Service` holds the `Repository` interface, not a concrete
-type, so it can be unit-tested with an in-memory fake later;
-`context.Context` as the idiomatic first parameter for I/O-touching
-methods; sentinel errors (`var ErrInvalid = errors.New(...)`) checked
-via `errors.Is`, instead of matching raw strings.
-
-**Open issues as of the last review** (fix these, then show the file again):
-1. `GetBySlug` has no function body — compile error.
-2. `NewService` has no function body — compile error.
-3. `Create` still builds `new([]Listing)` and calls `.append(...)` as
-   if it were a method (it's a built-in function, `append(slice, item)`,
-   not `slice.append(...)`) — but more importantly, `Create` shouldn't
-   build a slice at all. It should validate, then delegate to
-   `s.Repository.Create(ctx, l)` and return the single `Listing` that
-   comes back (mirroring the pattern below).
-4. `l.ImagesURL == ""` doesn't compile — slices can't be compared with
-   `==` to a string. Use `len(l.ImagesURL) == 0` to check emptiness.
-5. `l.ID < 0` is being validated in `Create`, but open question for the
-   user to resolve: at the moment `Create` is called, has this listing
-   been saved anywhere yet? Where would a meaningful `ID` value even
-   come from at that point?
-6. No `ErrInvalid` sentinel defined yet — still raw `errors.New("...")`
-   strings with typos in the messages.
-7. `GetBySlug` returns `[]Listing` (a slice) in both the `Repository`
-   interface and the `Service` method. Open question: a slug uniquely
-   identifies one listing — should this return a single `Listing`
-   instead?
-8. `Repository`'s `GetBySlug` and `Create` methods are missing
-   `ctx context.Context` as their first parameter — `List` already has
-   it; all three should be consistent.
-
-Worked example already given (to generalize the pattern from, not to
-copy elsewhere without understanding it) — this fixes two syntax
-mistakes: an unnamed parameter (so there was no `ctx` variable to
-reference inside the body) and calling-syntax vs. declaration-syntax
-confusion:
+`internal/listing/service.go` (final state, builds + vets clean):
 ```go
+package listing
+
+import (
+	"context"
+	"errors"
+)
+
+var ErrInvalid = errors.New("listing: invalid listing")
+
+type Repository interface {
+	List(ctx context.Context) ([]Listing, error)
+	GetBySlug(ctx context.Context, slug string) (Listing, error)
+	Create(ctx context.Context, l Listing) (Listing, error)
+}
+
+type Service struct {
+	Repository Repository
+}
+
+func NewService(repo Repository) *Service {
+	return &Service{Repository: repo}
+}
+
 func (s *Service) List(ctx context.Context) ([]Listing, error) {
 	return s.Repository.List(ctx)
 }
+
+func (s *Service) GetBySlug(ctx context.Context, slug string) (Listing, error) {
+	return s.Repository.GetBySlug(ctx, slug)
+}
+
+func (s *Service) Create(ctx context.Context, l Listing) (Listing, error) {
+	if l.CategoryID == 0 || l.MaxQuantity < 0 || l.PriceCents < 0 {
+		return Listing{}, ErrInvalid
+	}
+	if l.HeroImageURL == "" || len(l.ImagesURL) == 0 || l.Slug == "" || l.Title == "" {
+		return Listing{}, ErrInvalid
+	}
+	return s.Repository.Create(ctx, l)
+}
 ```
 
+Note on how this landed: after several rounds of itemized review (see
+git history / prior session for the full back-and-forth — unnamed
+`ctx` params, `.append()` called as a method instead of the builtin,
+slice-vs-string `==` comparisons, a bare `_ErrInvalid` token, `new(repo)`
+called on a value instead of `&Service{Repository: repo}`), the user
+explicitly asked Claude to write the final fix directly rather than
+continue iterating via hints — a deliberate one-off exception to the
+teach-don't-implement approach for this file, not a change to the
+overall policy (see `teach-dont-implement-learning-code` memory).
+Resume hint-only mode by default from Lesson 4 onward unless asked
+otherwise again.
+
+Design decisions resolved along the way:
+- `GetBySlug` returns a single `Listing`, not `[]Listing` — a slug
+  uniquely identifies one row.
+- `List` stays `[]Listing` — it's the one method that's actually
+  meant to return many.
+- `Create` does **not** validate `l.ID` — at the point `Create` is
+  called nothing has been persisted yet, so the caller has no
+  meaningful ID to supply; assigning one is the repository/DB's job.
+- One sentinel `ErrInvalid` covers both validation branches (checked
+  via `errors.Is`), replacing the earlier typo'd raw `errors.New(...)`
+  strings. Distinguishing *which* field failed (e.g. via
+  `fmt.Errorf("%w: ...", ErrInvalid)`) was flagged as a possible later
+  refinement, not done yet.
+
+### 🔧 Lesson 4 — table-driven tests against an in-memory fake `Repository` (IN PROGRESS)
+
+Not started yet beyond this point. Goal: `internal/listing/listing_test.go`,
+testing `Service` (List/GetBySlug/Create) against a hand-written fake
+that implements the `Repository` interface in-memory — this is the
+actual payoff of having split `Repository` out as an interface in
+Lesson 3. Teaching mode (hints + review, user writes the code) applies
+here by default.
+
 ### Not started yet
-- `internal/listing/listing_test.go` — table-driven tests against an
-  in-memory fake `Repository` (the actual payoff of the interface
-  split).
 - `internal/category` gets the same `Repository`/`Service` treatment.
 - `internal/order` — bigger: has line items, a price snapshot at
   purchase time, and always-belongs-to-a-user semantics.
