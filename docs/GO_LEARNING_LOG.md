@@ -43,7 +43,7 @@ From the project's approved plan, roughly in order:
 2. Domain types (plain structs, no framework annotations) — **done**
    (`Listing`, `Category`; `Order`/`User` domain types not started yet)
 3. `Repository`/`Service` interface pattern — **done**
-4. Table-driven unit tests against an in-memory fake repository — **in progress**
+4. Table-driven unit tests against an in-memory fake repository — **done**
 5. `pgx` + `golang-migrate` for real persistence — not started
 6. Stdlib `net/http` (Go 1.22 pattern routing) + hand-rolled middleware — not started
 7. `internal/auth` — verifying Supabase JWTs — not started
@@ -173,17 +173,64 @@ Design decisions resolved along the way:
   `fmt.Errorf("%w: ...", ErrInvalid)`) was flagged as a possible later
   refinement, not done yet.
 
-### 🔧 Lesson 4 — table-driven tests against an in-memory fake `Repository` (IN PROGRESS)
+### ✅ Lesson 4 — table-driven tests against an in-memory fake `Repository`
 
-Not started yet beyond this point. Goal: `internal/listing/listing_test.go`,
-testing `Service` (List/GetBySlug/Create) against a hand-written fake
-that implements the `Repository` interface in-memory — this is the
-actual payoff of having split `Repository` out as an interface in
-Lesson 3. Teaching mode (hints + review, user writes the code) applies
-here by default.
+`internal/listing/listing_test.go` — `fakeRepository` (in-memory
+`[]Listing`) implementing `Repository`, plus `TestServiceList`,
+`TestServiceGetBySlug`, and `TestServiceCreate` (table-driven over a
+`mutate func(Listing) Listing` pattern covering each validation
+branch). All passing (`go test ./internal/listing/...`).
+
+Note on how this landed: same as Lesson 3's `service.go` fix — after
+being asked twice to just implement it (once mid-explanation, then
+again immediately after explicitly choosing teaching mode in an
+AskUserQuestion — flagged as likely an accidental duplicate message,
+which the user then confirmed was intentional), Claude wrote this file
+directly as a one-off exception rather than continuing hint-only mode.
+Not a change to the overall policy — see
+`teach-dont-implement-learning-code` memory. Resume hint-only mode by
+default for whatever comes next (`internal/category`'s
+`Repository`/`Service` pattern, or `internal/order`) unless asked
+otherwise again.
+
+### ✅ `internal/category` — Repository/Service pattern
+
+`internal/category/service.go` — same shape as `listing`'s: `Repository`
+interface (`List`/`GetBySlug`/`Create`, `ctx` first param throughout),
+`Service` + `NewService`, `Create` validates then delegates. Builds and
+vets clean.
+
+This one was fully user-written and reviewed in several small rounds —
+back to hint-only mode as planned after Lesson 4's one-off exception.
+Real bug caught in review: first draft validated `l.ID == 0` as
+invalid in `Create`, same mistake the `ID` question in `listing` had
+already resolved the other way (nothing's been persisted yet at that
+point, so there's no meaningful `ID` to check) — fixed. Also took four
+review rounds to land the `ErrInvalid` message text (`"category:
+invalid category"` — went through a stray capital, a typo, a
+leftover plural, and a stray capital letter along the way; each round
+was minor and mechanical, not conceptual). Left as-is, by choice, not
+bugs: `len(l.ImageURL) == 0` instead of `l.ImageURL == ""` (works fine,
+`ImageURL` is a `string` not `[]string` so `len` isn't required but
+isn't wrong either), and the `Create` parameter is still named `l`
+(carried over from `listing`) rather than `c`.
+
+### ✅ `internal/category` — table-driven tests against an in-memory fake
+
+`internal/category/service_test.go` — `fakeRepository` (in-memory
+`[]Category`), `TestServiceList`, `TestServiceGetBySlug`,
+`TestServiceCreate` (3 validation branches: `ImageURL`, `Slug`, `Name`
+empty). All passing.
+
+Claude wrote this one directly (asked and confirmed, one-off exception
+again — see `teach-dont-implement-learning-code` memory) rather than
+the user writing it. `category`'s `service.go` itself was still fully
+user-written/reviewed.
+
+`internal/listing` and `internal/category` now both have complete
+`Repository`/`Service` + tests. Both packages' domain model is done.
 
 ### Not started yet
-- `internal/category` gets the same `Repository`/`Service` treatment.
 - `internal/order` — bigger: has line items, a price snapshot at
   purchase time, and always-belongs-to-a-user semantics.
 - `internal/auth`, `internal/platform/*`, `internal/config`,
