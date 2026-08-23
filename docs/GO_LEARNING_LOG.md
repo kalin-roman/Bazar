@@ -41,10 +41,12 @@ create table categories(
 From the project's approved plan, roughly in order:
 1. Module basics + why `internal/` is special — **done**
 2. Domain types (plain structs, no framework annotations) — **done**
-   (`Listing`, `Category`; `Order`/`User` domain types not started yet)
-3. `Repository`/`Service` interface pattern — **done**
-4. Table-driven unit tests against an in-memory fake repository — **done**
-5. `pgx` + `golang-migrate` for real persistence — not started
+   (`Listing`, `Category`, `Order`; `User` domain type not started yet)
+3. `Repository`/`Service` interface pattern — **done** (for `listing`,
+   `category`, `order` — not `User`)
+4. Table-driven unit tests against an in-memory fake repository —
+   **done** (same scope as above)
+5. `pgx` + `golang-migrate` for real persistence — **in progress**
 6. Stdlib `net/http` (Go 1.22 pattern routing) + hand-rolled middleware — not started
 7. `internal/auth` — verifying Supabase JWTs — not started
 8. `internal/config`, `internal/platform/{logger,database,middleware}` — not started
@@ -306,12 +308,43 @@ types + `Repository`/`Service` + tests, all user-written for the
 domain-type files, mixed for the service/test files (see each
 section above for exactly who wrote what).
 
+### 🔧 `pgx` + `golang-migrate` — real persistence (IN PROGRESS)
+
+First migration pair, fully user-written over several review rounds
+(all small/mechanical — braces vs. parens, `DELETE` vs. `DROP TABLE`,
+a stray empty `()` on the `DROP TABLE` call, missing semicolons — not
+conceptual struggles):
+
+`migrations/000001_create_categories.up.sql`:
+```sql
+create table categories(
+    id serial primary key,
+    name text not null,
+    slug text unique not null,
+    image_url text not null
+);
+```
+`migrations/000001_create_categories.down.sql`:
+```sql
+drop table categories;
+```
+
+Not yet validated against a real running Postgres (tried spinning up
+a throwaway container to apply up/down and confirm it round-trips
+cleanly, but the Docker daemon wasn't running at the time) — only
+reviewed by eye. Worth an actual `migrate up`/`migrate down` run once
+Docker/Postgres is available, before trusting this fully.
+
+`golang-migrate` CLI itself isn't installed yet (`migrate` not on
+PATH) — that's the next concrete step, then migrations for `listings`
+and `orders`/`order_items` tables, then wiring `pgx` in `db/db.go`
+(currently just `package db`, an empty stub) to actually connect and
+run queries, then a real `Repository` implementation for at least one
+package (`category` is the obvious first candidate — smallest schema).
+
 ### Not started yet
 - Possible: `Order.Total()` method (sum `Price * Quantity` across
   `Items`) — still undecided, raise it again if relevant later.
 - `internal/auth` — verifying Supabase JWTs.
-- `pgx` + `golang-migrate` for real persistence (the actual
-  `Repository` implementations — note an untracked `db/db.go` stub
-  exists, currently just `package db`, not yet folded into this).
 - `internal/platform/*`, `internal/config`, `cmd/server/main.go`
   wiring.
