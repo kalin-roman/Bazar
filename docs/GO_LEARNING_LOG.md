@@ -230,8 +230,88 @@ user-written/reviewed.
 `internal/listing` and `internal/category` now both have complete
 `Repository`/`Service` + tests. Both packages' domain model is done.
 
+### ✅ `internal/order` — domain types
+
+`internal/order/order.go`:
+```go
+package order
+
+type Order struct {
+	ID     int64
+	UserID int64
+	Items  []OrderItem
+}
+
+type OrderItem struct {
+	ListingID int64
+	Price     int64
+	Quantity  int64
+}
+```
+Fully user-written, several review rounds (each addressed one thing,
+not fixed simultaneously — normal pace for this file, not a sign of
+struggle): started with an empty `OrderItem`, a redundant
+`AmountOfOrderItems` counter field (`len(Items)` makes it derivable —
+same "don't store what you can cheaply compute" principle as the
+Lesson-2 note about `Category` not holding its `Listing`s), a stray
+`InStock bool` on `OrderItem` (current-state property, doesn't belong
+on a historical line item), and one round where `ListingID` landed on
+`Order` instead of `OrderItem` (would've meant one order = one
+listing, contradicting having multiple `Items`). Final shape resolves
+all four original design questions: `UserID` = ownership
+(one-directional, same pattern as `Listing.CategoryID`), `Items
+[]OrderItem` = multiple line items, `OrderItem.ListingID` = which
+listing (a bare `int64`, not an embedded `listing.Listing` — `order`
+doesn't import `listing` at all, keeps the packages decoupled),
+`OrderItem.Price`/`Quantity` = frozen at purchase time, independent of
+whatever the live `Listing` says later. Builds and vets clean.
+
+Still-open nit, not fixed, user's call: `OrderItem.Price` vs.
+`PriceCents` (matching `Listing.PriceCents`'s naming convention for
+integer-cents fields).
+
+### ✅ `internal/order` — Repository/Service pattern
+
+`internal/order/service.go` — same shape as `listing`/`category`, with
+two differences: `GetByID(ctx, id int64)` instead of `GetBySlug`
+(orders have no slug), and `Create`'s validation loops over `o.Items`
+checking each `OrderItem` (`ListingID == 0`, `Quantity <= 0` — note
+`<= 0` not `< 0`, zero items ordered isn't valid either — `Price < 0`),
+in addition to `UserID == 0` / `len(Items) == 0` on `Order` itself.
+Builds and vets clean.
+
+Claude wrote this one directly (asked and confirmed, one-off exception
+— see `teach-dont-implement-learning-code` memory); `order.go` itself
+was fully user-written/reviewed.
+
+Deliberately not added: any `Total()`/order-sum business logic — noted
+as a real design decision (would be a method on `Order` in `order.go`,
+summing `Price * Quantity` across `Items`, not something `Service`
+needs since it doesn't touch the repository) but left for the user to
+decide on, not folded in unprompted.
+
+### ✅ `internal/order` — table-driven tests against an in-memory fake
+
+`internal/order/service_test.go` — `fakeRepository` (in-memory
+`[]Order`, `GetByID` matches by `ID` not slug), `TestServiceList`,
+`TestServiceGetByID`, `TestServiceCreate` (7 cases: valid, `UserID ==
+0`, empty `Items`, then per-item `ListingID == 0` /
+`Quantity <= 0`/`-1` / `Price < 0`). All passing.
+
+Claude wrote this directly (asked and confirmed, one-off exception —
+see `teach-dont-implement-learning-code` memory).
+
+`listing`, `category`, and `order` are now all complete: domain
+types + `Repository`/`Service` + tests, all user-written for the
+domain-type files, mixed for the service/test files (see each
+section above for exactly who wrote what).
+
 ### Not started yet
-- `internal/order` — bigger: has line items, a price snapshot at
-  purchase time, and always-belongs-to-a-user semantics.
-- `internal/auth`, `internal/platform/*`, `internal/config`,
-  `cmd/server/main.go` wiring.
+- Possible: `Order.Total()` method (sum `Price * Quantity` across
+  `Items`) — still undecided, raise it again if relevant later.
+- `internal/auth` — verifying Supabase JWTs.
+- `pgx` + `golang-migrate` for real persistence (the actual
+  `Repository` implementations — note an untracked `db/db.go` stub
+  exists, currently just `package db`, not yet folded into this).
+- `internal/platform/*`, `internal/config`, `cmd/server/main.go`
+  wiring.
