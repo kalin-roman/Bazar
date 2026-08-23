@@ -94,3 +94,12 @@
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/migrations/000002_create_listings.up.sql","success":true,"timestamp":1787509044337,"sessionId":null}
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/migrations/000002_create_listings.down.sql","success":true,"timestamp":1787509046790,"sessionId":null}
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/migrations/000001_create_categories.up.sql","success":true,"timestamp":1787509098206,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/PORTFOLIO.md","success":true,"timestamp":1787509312854,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1787518125383,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/internal/user/service_test.go","success":true,"timestamp":1787518193650,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1787518205750,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1787519106939,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/migrations/000004_create_orders.up.sql","success":true,"timestamp":1787519381614,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/migrations/000004_create_orders.down.sql","success":true,"timestamp":1787519383572,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1787519396580,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1787519788274,"sessionId":null}

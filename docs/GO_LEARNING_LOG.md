@@ -310,12 +310,16 @@ section above for exactly who wrote what).
 
 ### 🔧 `pgx` + `golang-migrate` — real persistence (IN PROGRESS)
 
-First migration pair, fully user-written over several review rounds
-(all small/mechanical — braces vs. parens, `DELETE` vs. `DROP TABLE`,
-a stray empty `()` on the `DROP TABLE` call, missing semicolons — not
-conceptual struggles):
+Decision made along the way: no ORM (Sequelize doesn't apply — that's
+JS/TS only; the Go equivalent would be GORM). Sticking with raw `pgx`
++ hand-written SQL deliberately, since the `Repository` interface
+already makes this swappable later if ever wanted, and an ORM would
+hide exactly the SQL/schema mechanics this stage is meant to teach.
 
-`migrations/000001_create_categories.up.sql`:
+`migrations/000001_create_categories.up.sql` / `.down.sql` — fully
+user-written over several review rounds (braces vs. parens, `DELETE`
+vs. `DROP TABLE`, a stray empty `()`, missing semicolons — all
+mechanical, not conceptual):
 ```sql
 create table categories(
     id serial primary key,
@@ -324,27 +328,198 @@ create table categories(
     image_url text not null
 );
 ```
-`migrations/000001_create_categories.down.sql`:
 ```sql
 drop table categories;
 ```
+Note: `up.sql` was accidentally deleted from disk at one point (cause
+unknown — not from any `rm` Claude ran; the `migrations/` directory
+isn't tracked in git yet so there was no backup) and recreated from
+this log's own record of the last-confirmed-correct content. Worth
+committing `migrations/` to git soon so this can't happen silently
+again — offered, not yet done at user's request.
 
-Not yet validated against a real running Postgres (tried spinning up
-a throwaway container to apply up/down and confirm it round-trips
-cleanly, but the Docker daemon wasn't running at the time) — only
-reviewed by eye. Worth an actual `migrate up`/`migrate down` run once
-Docker/Postgres is available, before trusting this fully.
+`migrations/000002_create_listings.up.sql` / `.down.sql` — first pass
+fully user-written (many issues: missing commas, `serial` used for
+non-PK columns, invalid inline `foreign key` syntax, camelCase column
+names, an `image_url` column left on `listings` despite deciding on a
+separate table), then Claude rewrote it directly (asked and confirmed
+— one-off exception, see `teach-dont-implement-learning-code` memory).
+Two tables per the earlier images-storage decision:
+```sql
+create table listings(
+    id serial primary key,
+    category_id integer not null references categories(id),
+    title text not null,
+    slug text unique not null,
+    price_cents integer not null,
+    hero_image_url text not null,
+    max_quantity integer not null
+);
 
-`golang-migrate` CLI itself isn't installed yet (`migrate` not on
-PATH) — that's the next concrete step, then migrations for `listings`
-and `orders`/`order_items` tables, then wiring `pgx` in `db/db.go`
-(currently just `package db`, an empty stub) to actually connect and
-run queries, then a real `Repository` implementation for at least one
-package (`category` is the obvious first candidate — smallest schema).
+create table listing_images(
+    id serial primary key,
+    listing_id integer not null references listings(id),
+    url text not null,
+    position integer not null
+);
+```
+`down.sql` drops `listing_images` before `listings` (FK order).
+
+Neither migration has been validated against a real running Postgres
+yet (Docker daemon wasn't up when tried) — reviewed by eye only.
+`golang-migrate` CLI itself isn't installed (`migrate` not on PATH).
+
+### ✅ `internal/user` — domain type + Repository/Service
+
+Came up because `orders`' migration needs a `user_id` FK, but `User`
+didn't exist yet — user built this package proactively to unblock
+that (not formally assigned as a lesson first).
+
+Real design question that came up along the way: the plan (from
+before this session, item 7) already called for `internal/auth`
+verifying **Supabase JWTs** — meaning auth is delegated to Supabase,
+while the actual application data lives in Postgres via `pgx`. Those
+aren't in conflict (a JWT issuer and a data store can be two
+different things), but it settles an important point: this backend
+does **not** own credentials. Decision: keep Supabase for auth, no
+password storage in `internal/user` at all.
+
+`internal/user/user.go` (final, after removing a first-draft
+`Password string` field, fixing an accidentally-unexported
+`fullName`, and renaming a copy-pasted `HeroImageURL` to `Avatar`):
+```go
+package user
+
+type User struct {
+	ID              int64 // For future instead of the ID I should change it on the UUID from the Supabase
+	FullName        string
+	Email           string
+	Age             int64
+	AddressDelivery string
+	Avatar          string
+}
+```
+`internal/user/service.go` — same `Repository`/`Service` shape as the
+other three packages (`List`, `GetByID`, `Create`), `Create` validates
+`FullName`/`Email` non-empty (no `ID == 0` check — same resolved
+question as `listing`/`category`). Builds and vets clean. Not tested
+yet (`service_test.go` not written).
+
+Also created: `PORTFOLIO.md` at repo root — a recruiter-facing
+technical overview (architecture, what's demonstrated, honest current
+status), separate from the existing frontend-focused `README.md`.
+Claude wrote it directly (explicitly not learning-gated — same as the
+`web/` frontend fixes). User intends to write/overwrite `README.md`
+personally later; Claude is not touching that file.
+
+### ✅ `internal/user` — table-driven tests against an in-memory fake
+
+`internal/user/service_test.go` — `fakeRepository` (in-memory
+`[]User`), `TestServiceList`, `TestServiceGetByID`, `TestServiceCreate`
+(valid + missing `FullName` + missing `Email`). All passing.
+
+Claude wrote this directly (explicit, unambiguous request this time —
+"do the test instead of me" — one-off exception, see
+`teach-dont-implement-learning-code` memory).
+
+All four domain packages (`listing`, `category`, `order`, `user`) are
+now complete: types, `Repository`/`Service`, tests, all passing. User
+is now working on the `users`/`orders`/`order_items` migrations in
+parallel with this.
+
+### ✅ `users` table migration
+
+`migrations/000003_create_users.up.sql` / `.down.sql` — fully
+user-written, many review rounds (the most of any migration so far —
+worth noting for pattern, not as a concern): a wrong-model attempt at
+a single catch-all "drop everything" down file instead of a proper
+paired `000003` down migration; several casing round-trips (`fullName`
+→ `FullName` → `full_name`, i.e. went further wrong before landing
+right); a `users_email`/`users_password` table-prefix habit that
+needed correcting twice (once for email, then password separately);
+the table name itself flip-flopping `users` → `user` → `users` across
+rounds, independently of the filename being correct sooner; `id`
+staying `integer` instead of `serial` for several rounds after being
+flagged. All converged in the end without Claude writing any of it:
+```sql
+create table users(
+    id serial primary key,
+    full_name text not null,
+    email text not null,
+    age integer not null,
+    address_delivery text not null,
+    avatar text not null
+);
+```
+```sql
+drop table users;
+```
+Note: no `password` column, consistent with the Supabase-owns-auth
+decision — matches `internal/user`'s Go struct.
+
+### ✅ `orders`/`order_items` table migrations
+
+`migrations/000004_create_orders.up.sql` / `.down.sql` — Claude wrote
+directly (asked and confirmed, one-off exception). `orders` (`id`,
+`user_id` FK → `users`) and `order_items` (`id`, `order_id` FK →
+`orders`, `listing_id` FK → `listings`, `price_cents`, `quantity`) in
+one migration, `down.sql` drops `order_items` before `orders` (FK
+order). Note: SQL column is `price_cents`, matching `listings`'
+convention, even though the Go `OrderItem.Price` field was never
+renamed to match (flagged earlier, still an open/deferred nit).
+
+All four schema migrations are done: `categories`, `listings` +
+`listing_images`, `users`, `orders` + `order_items`. None validated
+against a real running Postgres yet (Docker wasn't up when tried
+earlier) — reviewed by eye only.
+
+### ✅ `golang-migrate` CLI — installed and validated against real Postgres
+
+`migrate` CLI installed via `go install
+github.com/golang-migrate/migrate/v4/cmd/migrate@latest` (in
+`~/go/bin`). Postgres: an existing Docker container named `Bazar`
+(`postgres` image, port `5431` on the host, password `bazarOnGo`) —
+was stopped, started it. Note there's a stray pre-existing `example`
+table in that database unrelated to this project's schema, left alone.
+
+Ran `migrate ... up` (all 4 applied in FK-dependency order), inspected
+the resulting schema directly via `psql \d` on every table — matched
+what was reviewed exactly (columns, types, FKs) — then `migrate ...
+down -all` (all 4 rolled back cleanly in reverse order, no FK errors),
+confirmed the database was back to empty (only the unrelated `example`
+table + `migrate`'s own `schema_migrations` tracking table remained),
+then re-applied `up` to leave the container in a useful state. Full
+round-trip validation, both directions, against a real database — not
+just reviewed by eye anymore.
+
+This step was infra/tooling (installing a CLI, running commands
+against a database), not learning-gated Go/SQL writing, so Claude did
+it directly without asking — consistent with how `go build`/`go
+vet`/`go test` have been run directly throughout, as distinct from
+writing the actual Go or SQL.
 
 ### Not started yet
+- `pgx` wiring in `db/db.go` (currently just `package db`, empty) +
+  real `Repository` implementations for all four domain packages.
+- `internal/auth` — verifying Supabase JWTs.
+- `internal/platform/*`, `internal/config`, `cmd/server/main.go`
+  wiring.
+- Possible: `Order.Total()` method — still undecided.
+- Possible: reconciling `User.ID` with Supabase's UUID identity —
+  flagged in code, not resolved.
+- Possible: renaming `OrderItem.Price` → `PriceCents` to match the
+  SQL column and the rest of the codebase's convention.
+- `orders` and `order_items` migrations (mirroring the `Order`/
+  `OrderItem` Go structs).
+- `golang-migrate` CLI install + an actual `migrate up`/`down` run
+  against real Postgres to validate all migrations so far.
 - Possible: `Order.Total()` method (sum `Price * Quantity` across
   `Items`) — still undecided, raise it again if relevant later.
+- Possible: reconciling `User.ID` (`int64`) with Supabase's UUID-based
+  identity — flagged in code as a future concern, not resolved.
+- `pgx` wiring in `db/db.go` (currently just `package db`, empty) +
+  real `Repository` implementations (`category` likely first —
+  smallest schema).
 - `internal/auth` — verifying Supabase JWTs.
 - `internal/platform/*`, `internal/config`, `cmd/server/main.go`
   wiring.
