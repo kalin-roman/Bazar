@@ -41,12 +41,14 @@ create table categories(
 From the project's approved plan, roughly in order:
 1. Module basics + why `internal/` is special — **done**
 2. Domain types (plain structs, no framework annotations) — **done**
-   (`Listing`, `Category`, `Order`; `User` domain type not started yet)
-3. `Repository`/`Service` interface pattern — **done** (for `listing`,
-   `category`, `order` — not `User`)
+   (`Listing`, `Category`, `Order`, `User`)
+3. `Repository`/`Service` interface pattern — **done** (all four
+   packages)
 4. Table-driven unit tests against an in-memory fake repository —
-   **done** (same scope as above)
+   **done** (all four packages)
 5. `pgx` + `golang-migrate` for real persistence — **in progress**
+   (schema migrations done + validated against real Postgres; `pgx`
+   connection + real `Repository` implementations not started)
 6. Stdlib `net/http` (Go 1.22 pattern routing) + hand-rolled middleware — not started
 7. `internal/auth` — verifying Supabase JWTs — not started
 8. `internal/config`, `internal/platform/{logger,database,middleware}` — not started
@@ -498,28 +500,111 @@ it directly without asking — consistent with how `go build`/`go
 vet`/`go test` have been run directly throughout, as distinct from
 writing the actual Go or SQL.
 
+### ✅ `pgx` wiring — `db/db.go`
+
+```go
+package db
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+var ErrInvalid = errors.New("db: invalid connection pool")
+
+func New(ctx context.Context, connString string) (*pgxpool.Pool, error) {
+	pool, err := pgxpool.New(ctx, connString)
+	if err != nil {
+		wrapped := fmt.Errorf("%w: %v", ErrInvalid, err)
+		return nil, wrapped
+	}
+	ping := pool.Ping(ctx)
+	return pool, ping
+}
+```
+Fully user-written, several review rounds. Real bugs along the way,
+not just style: an early attempt returned `pool.Ping` (the method
+value, uncalled, from an undefined `pool` variable — the actual
+variable was named `res`) instead of calling it; `pgxpool.New`'s own
+error went unchecked for a couple of rounds, meaning a failed pool
+creation would still fall through to calling `.Ping` on a bad pool;
+`fmt.Errorf`'s result was computed and then discarded (never assigned
+or returned) rather than actually wrapping the returned error — caught
+by `go vet` (`result of fmt.Errorf call not used`), not just review;
+and one round briefly returned `&pgxpool.Pool{}` (a zero-value, totally
+non-functional pool) instead of `nil` on the failure path, which
+would've been worse than the plain unwrapped error it replaced. All
+resolved. `pgx/v5` added via `go get` directly (package management,
+not learning-gated) — bumped `go.mod`'s `go` directive from `1.22.1` to
+`1.25.0` as a required side effect, flagged to user, doesn't affect the
+planned Go 1.22 `net/http` pattern-routing lesson (still available in
+1.25+). Not yet called from anywhere (no `main.go` wiring yet, by
+design — that's a later lesson).
+
+### ✅ `category`'s real `Repository` implementation — `internal/storage/postgres/categories.go`
+
+New package/location decided by user (their own reasoning, sound):
+`internal/storage/postgres`, one file per domain package it implements
+(`categories.go` first; `listing.go`/`order.go`/`user.go` later,
+mirroring the same pattern). Added `category.ErrNotFound` (exported
+sentinel — previously only the test fake had an unexported one) so
+real callers have something to `errors.Is` check against.
+
+`GetBySlug` — fully user-written over several review rounds: an
+`ID`/`ImageURL` receiver-name confusion early on that turned out to be
+"`Repository` doesn't exist yet, you have to define it" rather than an
+import problem; a genuine SQL bug (`from the categories` — extra word,
+confirmed by actually running the exact query against the real
+`Bazar` Postgres container and getting `ERROR: relation "the" does not
+exist`) caught before Claude touched the file; `fmt.Println(...,
+"%s", err)` misusing `Println` for `Printf`-style formatting, caught
+by `go vet` directly. User then asked Claude to review-and-fix
+directly (one-off exception): removed the print entirely (a repository
+method logging its own errors was flagged as mixing concerns), added
+the `pgx.ErrNoRows` → `category.ErrNotFound` translation, switched to
+pointer receiver, added `var _ category.Repository = (*Repository)(nil)`.
+
+That interface-satisfaction check caused user confusion for a few
+messages — with only `GetBySlug` implemented, `*Repository` correctly
+failed to satisfy `category.Repository` ("missing method Create"),
+which read as broken code rather than the check doing its job (it's
+supposed to fail until all three methods exist). Worth remembering for
+future sessions: introduce this check with an explicit heads-up that
+it errors until the interface is fully implemented, not just as a
+one-line aside.
+
+`List`/`Create`: user's first attempt at `List` had real syntax errors
+(`row.)`, an empty `for range`, `QueryRow` used with a `List` query
+that still referenced a `slug` parameter that didn't exist) — user then
+asked Claude to implement both directly (one-off exception). Final
+version validated against the real `Bazar` Postgres container end to
+end, not just compiled: a temporary throwaway `cmd/verify-temp/main.go`
+exercised `Create` → `GetBySlug` (found) → `GetBySlug` (missing, got
+`category.ErrNotFound`) → `List` → cleanup, all correct, then deleted
+(never meant to be committed).
+
+`category`'s full stack is now done: domain type, `Repository`/
+`Service`, fakes/tests, and a real `pgx`-backed implementation,
+validated against real Postgres.
+
 ### Not started yet
-- `pgx` wiring in `db/db.go` (currently just `package db`, empty) +
-  real `Repository` implementations for all four domain packages.
-- `internal/auth` — verifying Supabase JWTs.
-- `internal/platform/*`, `internal/config`, `cmd/server/main.go`
-  wiring.
-- Possible: `Order.Total()` method — still undecided.
-- Possible: reconciling `User.ID` with Supabase's UUID identity —
-  flagged in code, not resolved.
-- Possible: renaming `OrderItem.Price` → `PriceCents` to match the
-  SQL column and the rest of the codebase's convention.
-- `orders` and `order_items` migrations (mirroring the `Order`/
-  `OrderItem` Go structs).
-- `golang-migrate` CLI install + an actual `migrate up`/`down` run
-  against real Postgres to validate all migrations so far.
-- Possible: `Order.Total()` method (sum `Price * Quantity` across
-  `Items`) — still undecided, raise it again if relevant later.
-- Possible: reconciling `User.ID` (`int64`) with Supabase's UUID-based
-  identity — flagged in code as a future concern, not resolved.
-- `pgx` wiring in `db/db.go` (currently just `package db`, empty) +
-  real `Repository` implementations (`category` likely first —
-  smallest schema).
-- `internal/auth` — verifying Supabase JWTs.
-- `internal/platform/*`, `internal/config`, `cmd/server/main.go`
-  wiring.
+
+Remaining core lessons, roughly in order:
+1. Real `Repository` implementations for the other three domain
+   packages (`listing`, `order`, `user`), same `internal/storage/postgres`
+   pattern as `category` — `listing.go`, `order.go`, `user.go`.
+2. `net/http` routing (Go 1.22 pattern routing) + hand-rolled
+   middleware.
+3. `internal/auth` — verifying Supabase JWTs.
+4. `internal/config`, `internal/platform/{logger,database,middleware}`.
+5. `cmd/server/main.go` — wiring everything together into an actual
+   running server.
+
+Deferred/optional polish, not blocking, revisit if relevant later:
+- `Order.Total()` method (sum `Price * Quantity` across `Items`).
+- Reconciling `User.ID` (`int64`) with Supabase's UUID-based identity.
+- Renaming `OrderItem.Price` → `PriceCents`, matching the SQL column
+  and the rest of the codebase's naming convention.

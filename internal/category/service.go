@@ -6,6 +6,7 @@ import (
 )
 
 var ErrInvalid = errors.New("category: invalid category")
+var ErrNotFound = errors.New("category: not found")
 
 type Repository interface {
 	List(ctx context.Context) ([]Category, error)
