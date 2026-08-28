@@ -6,6 +6,7 @@ import (
 )
 
 var ErrInvalid = errors.New("order: invalid order")
+var ErrNotFound = errors.New("order: not found")
 
 type Repository interface {
 	List(ctx context.Context) ([]Order, error)

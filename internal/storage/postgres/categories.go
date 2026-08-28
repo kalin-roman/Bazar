@@ -10,17 +10,17 @@ import (
 	"github.com/kalin-roman/Bazar/internal/category"
 )
 
-type Repository struct {
+type CategoryRepository struct {
 	ConnectionPool *pgxpool.Pool
 }
 
-var _ category.Repository = (*Repository)(nil)
+var _ category.Repository = (*CategoryRepository)(nil)
 
-func New(pool *pgxpool.Pool) *Repository {
-	return &Repository{ConnectionPool: pool}
+func NewCategorieRepository(pool *pgxpool.Pool) *CategoryRepository {
+	return &CategoryRepository{ConnectionPool: pool}
 }
 
-func (r *Repository) GetBySlug(ctx context.Context, slug string) (category.Category, error) {
+func (r *CategoryRepository) GetBySlug(ctx context.Context, slug string) (category.Category, error) {
 	row := r.ConnectionPool.QueryRow(ctx, "select id, name, slug, image_url from categories where slug = $1", slug)
 
 	var c category.Category
@@ -37,7 +37,7 @@ func (r *Repository) GetBySlug(ctx context.Context, slug string) (category.Categ
 	return c, nil
 }
 
-func (r *Repository) List(ctx context.Context) ([]category.Category, error) {
+func (r *CategoryRepository) List(ctx context.Context) ([]category.Category, error) {
 	rows, err := r.ConnectionPool.Query(ctx, "select id, name, slug, image_url from categories")
 	if err != nil {
 		return nil, fmt.Errorf("list categories: %w", err)
@@ -59,7 +59,7 @@ func (r *Repository) List(ctx context.Context) ([]category.Category, error) {
 	return categories, nil
 }
 
-func (r *Repository) Create(ctx context.Context, c category.Category) (category.Category, error) {
+func (r *CategoryRepository) Create(ctx context.Context, c category.Category) (category.Category, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
 		"insert into categories (name, slug, image_url) values ($1, $2, $3) returning id",
 		c.Name, c.Slug, c.ImageURL,

@@ -590,12 +590,47 @@ exercised `Create` → `GetBySlug` (found) → `GetBySlug` (missing, got
 `Service`, fakes/tests, and a real `pgx`-backed implementation,
 validated against real Postgres.
 
+### ✅ `listing`'s real `Repository` implementation — `internal/storage/postgres/listing.go`
+
+Added `listing.ErrNotFound` (same reasoning as `category`'s). First
+draft (user-written) hit the same type-collision issue `category`'s
+constructor pattern implied but didn't warn about explicitly: reused
+`Repository` (the type from `categories.go`) for `listing`'s methods
+too — `method Repository.List already declared`, since a Go type can
+only have one method of a given name regardless of differing
+signatures. Fixed by introducing a separate `ListingRepository` type
+(worth remembering: **future domain repositories need their own named
+struct type, not a shared `Repository`** — flag this explicitly next
+time before assigning the task, don't just leave it as an implicit
+"decide the shape" question).
+
+Beyond that, first draft had real runtime-only bugs invisible to
+`go build`/`go vet` (SQL is just a string to the compiler): `Scan`
+called with bare values instead of `&`-prefixed pointers (compiles —
+`Scan` takes `...any` — but pgx errors at runtime on non-pointer
+destinations); `Scan` destination order not matching the `select`'s
+column order; `insert into listing` (singular, wrong table name);
+an insert column-list/placeholder-count mismatch (6 columns, 7
+placeholders); attempting to insert/scan `l.ID` and `l.ImagesURL` where
+neither belongs (`ID` is the auto-generated PK, `ImagesURL` lives in
+the separate `listing_images` table, not a `listings` column). User
+asked Claude to fix directly (one-off exception). `ImagesURL` is
+deliberately left unpopulated (`nil`) by every method here — treated
+as explicitly deferred (needs a second query or join against
+`listing_images`, real added work) rather than guessed at.
+
+Validated against the real `Bazar` Postgres container end-to-end via a
+temporary `cmd/verify-temp/main.go` (seeded a category to satisfy the
+FK, then `Create` → `GetBySlug` found → `GetBySlug` missing →
+`listing.ErrNotFound` → `List` → cleanup), deleted after.
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. Real `Repository` implementations for the other three domain
-   packages (`listing`, `order`, `user`), same `internal/storage/postgres`
-   pattern as `category` — `listing.go`, `order.go`, `user.go`.
+1. Real `Repository` implementations for `order` and `user`, same
+   `internal/storage/postgres` pattern (`order.go`, `user.go`) — each
+   needs its own named struct type (see note above, don't reuse
+   `Repository`/`ListingRepository`).
 2. `net/http` routing (Go 1.22 pattern routing) + hand-rolled
    middleware.
 3. `internal/auth` — verifying Supabase JWTs.

@@ -6,6 +6,7 @@ import (
 )
 
 var ErrInvalid = errors.New("listing: invalid listing")
+var ErrNotFound = errors.New("listing: not found")
 
 type Repository interface {
 	List(ctx context.Context) ([]Listing, error)
