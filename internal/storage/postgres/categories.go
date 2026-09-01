@@ -14,7 +14,7 @@ type CategoryRepository struct {
 	ConnectionPool *pgxpool.Pool
 }
 
-var _ category.Repository = (*CategoryRepository)(nil)
+var _ category.Repository = (*CategoryRepository)(nil) // points that this one has an interface
 
 func NewCategorieRepository(pool *pgxpool.Pool) *CategoryRepository {
 	return &CategoryRepository{ConnectionPool: pool}

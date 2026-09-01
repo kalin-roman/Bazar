@@ -624,18 +624,212 @@ temporary `cmd/verify-temp/main.go` (seeded a category to satisfy the
 FK, then `Create` → `GetBySlug` found → `GetBySlug` missing →
 `listing.ErrNotFound` → `List` → cleanup), deleted after.
 
+### ✅ `order`'s real `Repository` implementation — `internal/storage/postgres/order.go`
+
+Added `order.ErrNotFound`, same pattern as the other three. This one's
+structurally different from `category`/`listing`: `Order.Items` lives
+in a separate `order_items` table, so every method needs a second
+query. Added a private `itemsForOrder` helper (fetches `order_items`
+by `order_id`) that both `GetByID` and `List` call to assemble the
+full `Order` value — `List` calls it once per order in a loop (the
+simple, more-round-trips approach, flagged as fine for now over a
+join).
+
+`Create` introduces **transactions** — new concept, first time it's
+come up. Writing an `Order` means two tables (`orders`, then one
+`order_items` row per item); a transaction (`pool.Begin(ctx)` → do all
+writes against the returned `tx`, not the pool directly → `tx.Commit`
+only if everything succeeded, with `defer tx.Rollback(ctx)` as a
+safe-if-already-committed no-op backstop) is what actually answers the
+"what if an insert fails partway through" question raised when this
+task was assigned — without it, a failed `order_items` insert could
+leave a saved `orders` row with missing/partial items behind.
+
+User asked Claude to write this file directly (one-off exception) —
+wrote the struct/constructor/interface-check shape correctly
+themselves first (visible progress: no longer needing that pattern
+re-explained). Validated end-to-end against the real `Bazar` Postgres
+container (seeded a user + category + listing to satisfy FKs, then
+`Create` with 2 line items → `GetByID` found, both items present →
+`GetByID` missing → `order.ErrNotFound` → `List` → cleanup).
+
+Three of the four domain packages now have complete, validated real
+`pgx` implementations: `category`, `listing`, `order`. **`user` still
+pending** — smallest of the four in scope, but worth remembering it
+still needs its own `UserRepository` type + constructor, following the
+exact same pattern.
+
+### ✅ `user`'s real `Repository` implementation — `internal/storage/postgres/user.go`
+
+Added `user.ErrNotFound`, same pattern as the other three. Single
+table (`users`), no multi-query complexity like `order`'s — a clean,
+uneventful pass mirroring `category`'s shape exactly. Claude wrote it
+directly (asked and confirmed). Validated end-to-end against the real
+`Bazar` Postgres container (`Create` → `GetByID` found → `GetByID`
+missing → `user.ErrNotFound` → `List` → cleanup).
+
+**Persistence lesson (item 5 on the original roadmap) is now fully
+complete**: all four domain packages (`category`, `listing`, `order`,
+`user`) have types, `Repository`/`Service`, fake-backed tests, and
+real, validated `pgx` implementations in `internal/storage/postgres`.
+
+### 🔧 `net/http` routing — first endpoint done, `category` only so far
+
+Layering established: HTTP handler → `Service` → `Repository` (each
+layer knows only the one below it — handler never touches `pgxpool`,
+mirrors the domain/persistence split from earlier lessons). New
+top-level layout: `internal/http/<domain>http/` per domain package,
+mirroring `internal/storage/postgres/`'s one-file-per-domain pattern —
+so far just `internal/http/categoryhttp/`.
+
+`handlers.go` (fully user-written, several rounds): `HandlesService`
+struct holding `*category.Service`, `NewCategoriesService` constructor,
+`List` method. Real conceptual mixups along the way, not just syntax:
+package named `category` colliding with the imported domain package of
+the same name (fixed → `categoryhttp`); `New`'s body calling
+`category.NewService(s)` on an already-constructed `*Service` instead
+of constructing this file's own handler struct; a `var _
+category.Service = (*HandlesService)(nil)` interface-check attempted
+against `category.Service`, which is a concrete struct, not an
+interface (that check only means something against an interface type
+— removed). Also: user asked "should this use pgxpool.Pool" — good
+question, answered no, reinforced the full layering chain explicitly.
+Final `List` method correct: `r.Context()`, calls `Service.List`,
+writes JSON, minimal error handling. Minor open items, not blocking:
+`category` (the local var) shadows the package name, `Encode`'s error
+is silently ignored — both flagged, neither fixed yet.
+
+`router.go`: `NewRouter` builds an `*http.ServeMux`, registers `GET
+/categories` → `handler.List`. Two real bugs, both compiler-caught:
+`*http.ServerMux` (typo, should be `ServeMux`) and `mux.Handle(...)`
+used instead of `mux.HandleFunc(...)` (`Handle` needs something that
+already implements the `http.Handler` interface; a plain function
+needs `HandleFunc`, which adapts it). Both fixed by user.
+
+Validated end-to-end for real: a temporary harness wired real
+Postgres → `CategoryRepository` → `category.Service` → `HandlesService`
+→ `NewRouter`, started an actual `http.Server`, and `curl`'d
+`GET /categories` — got `200`, body `null` (table's empty right now,
+which is correct — `nil` slice encodes as JSON `null`, not `[]`; noted
+as an open API-design decision, not a bug, for later). Deleted after.
+
+Incidental cleanup along the way: `categories.go`'s constructor got
+renamed by the user to match the other three's naming convention
+(`CategoryRepository`/`NewCategorieRepository` — small typo, missing
+an `s`, `NewCategoryRepository` was probably intended).
+
+### ✅ `listing`'s HTTP handler + router — `internal/http/listinghttp/`
+
+Fully user-written, went noticeably faster than `category`'s first
+pass — mostly mechanical adaptation this time rather than new
+concepts. Real thing that came up along the way: a design question
+about consolidating routing. User asked whether all domains' routes
+could live in one common router file instead of each domain building
+its own separate `*http.ServeMux`. Answer: yes, and it's actually the
+more correct shape once there's more than one domain — an `http.Server`
+needs exactly one handler, so four independent muxes would need
+merging (fiddly) versus one shared mux with every domain's routes
+registered onto it (simpler). Decided to defer building that
+consolidation until the `cmd/server/main.go` wiring lesson, since
+that's the same job (assembling every piece together) — each domain's
+`*http` package keeps its own `NewRouter` for now, still useful
+standalone.
+
+`handlers.go`: first draft was copy-pasted from `categoryhttp` without
+fully adapting names — constructor still called `NewCategoriesService`
+inside `listinghttp`, and the `List` method's result variable was
+still named `category` despite holding `[]listing.Listing`. Both
+fixed by user (→ `NewListingService`, → `listing` — though that still
+shadows the imported `listing` package for the rest of the function,
+same low-priority habit flagged before, harmless here, not fixed).
+
+`router.go`: correct on `ServeMux`/`HandleFunc` this time (no repeat
+of `categoryhttp`'s typos) — only issue was the registered path being
+singular (`/listing`) instead of plural (`/listings`), fixed.
+
+Validated end-to-end same as `category`: temporary harness wired real
+Postgres → `ListingRepository` → `listing.Service` → handler → router,
+real `http.Server`, `curl GET /listings` → `200`, `null` (empty table,
+expected). Deleted after.
+
+Two domains done (`category`, `listing`), two left (`order`, `user`)
+for handler/router — then hand-rolled middleware, not started yet.
+
+### ✅ `order`'s HTTP handler + router — `internal/http/orderhttp/`
+
+Claude wrote directly (asked and confirmed). Same shape as `category`/
+`listing`: `HandlesService` holding `*order.Service`,
+`NewOrderService` constructor, `List` method, `NewRouter` registering
+`GET /orders`. Validated end-to-end against real Postgres (`200`,
+`null` — empty table).
+
+Three domains done (`category`, `listing`, `order`), one left (`user`)
+for handler/router — then hand-rolled middleware.
+
+### ✅ `user`'s HTTP handler + router — `internal/http/userhttp/`
+
+Claude wrote directly (asked and confirmed — user said it's "exactly
+the same" as the other three, one-off exception). Same shape as
+`category`/`listing`/`order`: `HandlesService` holding `*user.Service`
+(field named `UserService`, matching `order`'s `OrderService`
+convention rather than `category`'s `CatService`), `NewUserService`
+constructor, `List` method, `NewRouter` registering `GET /users`.
+`go build ./internal/...` and `go vet ./internal/...` both clean.
+
+Not validated live against real Postgres this time — Docker Desktop's
+daemon wasn't running (`docker` CLI targets its socket specifically;
+the system `dockerd` was active but permission-denied on the fallback
+socket) and the user opted to skip rather than start it, since
+build+vet already pass and this is a mechanical mirror of three
+already-validated implementations. Worth doing the live curl check
+next time Docker Desktop happens to be up anyway, just to close it
+out.
+
+All four domains (`category`, `listing`, `order`, `user`) now have
+complete HTTP handler + router layers.
+
+### ⤺ Router consolidation — tried, then reverted
+
+User's own idea, prompted by not liking 4 files with identical
+structure scattered one per domain package. Built
+`internal/http/router/router.go` (package `router`, named to avoid
+colliding with `net/http`) holding `NewRouterCategory`/
+`NewRouterListing`/`NewRouterOrder`/`NewRouterUser`, each still
+building and returning its own separate `*http.ServeMux` — Claude
+wrote it directly (explicit request), built + vetted clean.
+
+On reflection (prompted by asking "is this a good approach"), flagged
+a real gap: this only reorganizes files, it doesn't solve the
+composability problem already named during the `listing` lesson — an
+`http.Server` needs exactly one handler, and 4 independently-built
+muxes still don't merge into one without either switching to a
+"register onto a shared mux passed in as an argument" shape, or path
+prefixing + `http.StripPrefix` (the "fiddly" option already dismissed
+earlier). So this change made source layout tidier without actually
+moving the real problem forward.
+
+**Reverted** at user's request — deleted `internal/http/router/`,
+recreated the original 4 `router.go` files (one per `<domain>http`
+package, each with its own `NewRouter(h *HandlesService)
+*http.ServeMux`), byte-for-byte the same shape as before the
+consolidation attempt. Builds + vets clean. Back to the state after
+`user`'s HTTP handler + router lesson.
+
+The underlying composability question is still open and still
+deferred to the `main.go` wiring lesson, as originally decided — worth
+remembering when we get there that "each domain returns its own new
+mux" is the shape that needs to change (to register-onto-shared-mux)
+for a single `http.Server` to actually serve all four domains.
+
+Next: hand-rolled middleware.
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. Real `Repository` implementations for `order` and `user`, same
-   `internal/storage/postgres` pattern (`order.go`, `user.go`) — each
-   needs its own named struct type (see note above, don't reuse
-   `Repository`/`ListingRepository`).
-2. `net/http` routing (Go 1.22 pattern routing) + hand-rolled
-   middleware.
-3. `internal/auth` — verifying Supabase JWTs.
-4. `internal/config`, `internal/platform/{logger,database,middleware}`.
-5. `cmd/server/main.go` — wiring everything together into an actual
+1. Hand-rolled middleware (not started at all yet).
+2. `internal/auth` — verifying Supabase JWTs.
+3. `internal/config`, `internal/platform/{logger,database,middleware}`.
+4. `cmd/server/main.go` — wiring everything together into an actual
    running server.
 
 Deferred/optional polish, not blocking, revisit if relevant later:
