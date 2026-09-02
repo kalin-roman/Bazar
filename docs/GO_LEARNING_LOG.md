@@ -891,16 +891,86 @@ middleware that calls `VerifyToken` on the `Authorization: Bearer`
 header and rejects/passes the request accordingly) or into `main.go` —
 those are part of the wiring lesson still ahead.
 
+### ✅ Auth middleware — `internal/http/middleware/auth.go`
+
+Mostly user-written, several review rounds, each addressing one thing —
+good example of the closure-nesting concept genuinely landing after a
+few passes rather than being explained once and immediately correct:
+
+1. First draft only had the outer `Auth(secret) func(http.Handler)`
+   layer — missing the middle `func(next http.Handler) http.Handler`
+   layer entirely, and tried returning an `http.HandlerFunc` straight
+   from layer 1. Didn't compile (confirmed via `go build`). Explained
+   via walking `Logging`'s already-working two-layer shape and mapping
+   each layer's type onto what `Auth` additionally needs (secret
+   captured before `next` exists) — worth remembering for future
+   closure-shaped lessons: anchor new nesting concepts against a
+   working example already in the codebase, not just type signatures
+   in the abstract.
+2. Second attempt fixed the outer return type but added `http.Handler`
+   as a return type on the *innermost* function literal, breaking its
+   conversion to `http.HandlerFunc` (which requires exactly
+   `func(http.ResponseWriter, *http.Request)`, no return value) — user
+   asked Claude to write just this structural piece directly (one-off
+   exception, diff shown rather than rewriting the whole file), leaving
+   the header-check logic bugs untouched/unfixed on purpose.
+3. Header-prefix check went through real logic bugs, caught by review
+   before any test ran: inverted condition (rejected when `"Bearer"`
+   *was* present, should reject when absent), an off-by-one manual
+   slice (`authorized[0:7]` compared against 6-char `"Bearer"`, always
+   false), and a slice that would panic at runtime on a short header
+   string — same "runtime-only bug invisible to `go build`" category as
+   the earlier `pgx` `Scan`-without-`&` mistake. Fixed by switching to
+   `strings.HasPrefix`/`strings.TrimPrefix` (safe on short input) and
+   negating the condition.
+4. `auth.VerifyToken(token, secret)`'s return values were called but
+   discarded entirely for a round — compiles fine (Go allows ignoring
+   return values, unlike unused local variables) but meant *any* token,
+   valid or forged or expired, passed straight through with no 401 —
+   the middleware's whole reason for existing silently did nothing.
+   Caught by review, not the compiler.
+5. Final remaining piece (context propagation + calling `next`) Claude
+   wrote directly (explicit request, "fix it and check again") since it
+   was the one part never actually attempted yet: `ctxKey` unexported
+   int type + `userIDKey` const + `UserIDFromContext(ctx)
+   (string, bool)` helper (the two-value `ctx.Value(...).(string)`
+   form), and the success path — `context.WithValue` +
+   `next.ServeHTTP(w, r.WithContext(ctx))`.
+
+Verified with a throwaway `httptest` table (deleted after): no
+`Authorization` header → 401, `next` not called; garbage token → 401,
+`next` not called; valid signed token → `200`, `next` called, and
+`UserIDFromContext` inside the wrapped handler correctly recovers the
+`sub` claim (`"user-123"`) — proves the context propagation actually
+works end-to-end, not just that it compiles. `go build ./internal/...`
+and `go vet ./internal/...` both clean.
+
+Auth middleware is now complete and proven standalone. Still not wired
+into any router or `main.go` — that's the wiring lesson.
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. Auth middleware — wrap `VerifyToken` in an `http.Handler` wrapper
-   (same `Logging` shape from the middleware lesson), reading the
-   `Authorization: Bearer <token>` header.
-2. `internal/config`, `internal/platform/{logger,database,middleware}`.
+1. `internal/config` — load the Postgres connection string and JWT
+   secret from environment variables instead of hardcoding/passing
+   them as bare parameters.
+2. Router composition refactor — change the four `NewRouterX` functions
+   from "each builds its own `*http.ServeMux`" to "each registers
+   routes onto a `*http.ServeMux` passed in", so `main.go` can build
+   one shared mux across all four domains (resolves the deferred
+   "4 separate muxes don't compose into one `http.Server`" question).
 3. `cmd/server/main.go` — wiring everything together into an actual
-   running server (also where the deferred "4 separate muxes don't
-   compose into one `http.Server`" question finally gets resolved).
+   running server: config → `db.New` pool → all four
+   repo/service/handler stacks → one shared mux → wrap in `Logging` +
+   `Auth` middleware → `http.ListenAndServe`. Then smoke-test live
+   against real Postgres end-to-end, same as every other piece.
+4. `internal/platform/{logger,database,middleware}` — optional
+   organizational polish, not functionally required.
+
+`PORTFOLIO.md` was updated to reflect all of the above as of this
+point (auth verification + middleware pattern + this auth middleware
+all done; router composition, config, and `main.go` wiring still
+ahead) — kept in sync with this log, not left stale.
 
 Deferred/optional polish, not blocking, revisit if relevant later:
 - `Order.Total()` method (sum `Price * Quantity` across `Items`).
