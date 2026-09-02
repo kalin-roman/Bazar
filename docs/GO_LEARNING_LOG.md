@@ -823,14 +823,84 @@ for a single `http.Server` to actually serve all four domains.
 
 Next: hand-rolled middleware.
 
+### ✅ First hand-rolled middleware — `internal/http/middleware/middleware.go`
+
+User's first attempt (`internal/http/middleware.go`, `package http`)
+hit the exact package-naming collision flagged during the router
+lesson — naming a package `http` right next to a `net/http` import —
+plus an incomplete function (no body). Claude wrote it directly
+(explicit request), moving it into its own subpackage for the same
+reason `router` got one: `internal/http/middleware/middleware.go`,
+`package middleware`.
+
+`Logging(next http.Handler) http.Handler` — the core hand-rolled
+middleware pattern: wraps a handler, returns
+`http.HandlerFunc(func(w, r) {...})` that does work around calling
+`next.ServeHTTP(w, r)`. This one times the request (`time.Now()` /
+`time.Since`) and logs method + path + duration after the wrapped
+handler returns.
+
+Verified with a throwaway `httptest`-based test (no Postgres needed
+for this one) — confirmed the wrapped handler actually gets called
+(guards against the classic bug: a middleware that forgets
+`next.ServeHTTP` silently breaks everything past it) and its status
+code passes through untouched; logged output confirmed real
+(`GET /categories 1.203µs`). Test file deleted after, same
+throwaway-harness pattern as the Postgres verification steps.
+
+Not yet wired into any router (no `main.go` yet) — first middleware
+proven standalone, chaining/application decisions deferred, same as
+routing.
+
+### ✅ `internal/auth` — verifying Supabase JWTs
+
+Confirmed with the user first: this Supabase project uses legacy HS256
+(shared-secret) signing, not the newer asymmetric ES256/RS256+JWKS —
+settles which library/approach applies. Added
+`github.com/golang-jwt/jwt/v5` via `go get` directly (package
+management, not learning-gated, same as `pgx` earlier) — no `go.mod`
+side effects this time.
+
+`internal/auth/auth.go`: `ErrInvalidToken` sentinel (same
+wrap-with-`%w` pattern as `db.New`), `VerifyToken(tokenString, secret
+string) (string, error)`. Uses `jwt.ParseWithClaims` with
+`jwt.RegisteredClaims`, extracts `Subject` (the `sub` claim — Supabase
+puts the user's UUID there) as the returned user ID. Secret is taken
+as a plain parameter for now, not sourced from config — no
+`internal/config` yet, that's a later lesson.
+
+Claude wrote this directly (explicit request — "write it instead of
+me"). Real security detail baked in, not just plumbing: the keyFunc
+checks `token.Method.(*jwt.SigningMethodHMAC)` before returning the
+secret, which is what actually defends against the "algorithm
+confusion" JWT attack class (a forged token claiming `alg: none` or a
+different algorithm, trying to bypass verification) — this isn't
+optional/style, skipping it is a real vulnerability.
+
+Verified with a throwaway table of tests (deleted after, same
+temp-harness pattern used throughout): valid token → correct user ID;
+expired token → rejected (library handles `exp` automatically, no
+manual check needed); wrong secret → rejected; and specifically an
+`alg: none` token signed via `jwt.UnsafeAllowNoneSignatureType` →
+rejected, proving the algorithm-confusion guard actually works and
+isn't just defensive-looking dead code. `go build ./internal/...` and
+`go vet ./internal/...` both clean.
+
+Not yet wired into a middleware (an obvious next step — an `Auth`
+middleware that calls `VerifyToken` on the `Authorization: Bearer`
+header and rejects/passes the request accordingly) or into `main.go` —
+those are part of the wiring lesson still ahead.
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. Hand-rolled middleware (not started at all yet).
-2. `internal/auth` — verifying Supabase JWTs.
-3. `internal/config`, `internal/platform/{logger,database,middleware}`.
-4. `cmd/server/main.go` — wiring everything together into an actual
-   running server.
+1. Auth middleware — wrap `VerifyToken` in an `http.Handler` wrapper
+   (same `Logging` shape from the middleware lesson), reading the
+   `Authorization: Bearer <token>` header.
+2. `internal/config`, `internal/platform/{logger,database,middleware}`.
+3. `cmd/server/main.go` — wiring everything together into an actual
+   running server (also where the deferred "4 separate muxes don't
+   compose into one `http.Server`" question finally gets resolved).
 
 Deferred/optional polish, not blocking, revisit if relevant later:
 - `Order.Total()` method (sum `Price * Quantity` across `Items`).
