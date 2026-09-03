@@ -948,13 +948,39 @@ and `go vet ./internal/...` both clean.
 Auth middleware is now complete and proven standalone. Still not wired
 into any router or `main.go` — that's the wiring lesson.
 
+### ✅ `internal/config` — `internal/config/config.go`
+
+User-written first draft: `Config` struct (`ConnectionString`,
+`JWTsecret`) + a bare `Load() (*Config, error)` signature with no body
+yet — didn't compile (`missing function body`), expected at that
+stage. One real naming nit caught in review before the body existed:
+`JWTsecret` should be `JWTSecret` — `JWT` is itself an initialism,
+same casing convention from Lesson 2 (`ID`, `URL`, not `Id`/`Url`).
+
+Claude wrote the fix + `Load`'s body directly (explicit request).
+`ErrMissingEnv` sentinel (same `%w`-wrapping style as `db`/`auth`).
+`Load` reads `DATABASE_URL` and `JWT_SECRET` via `os.LookupEnv` (not
+`os.Getenv` — `LookupEnv`'s second return value distinguishes "unset"
+from "set to empty string," which matters for failing fast on a
+missing required secret rather than silently proceeding with a blank
+one). Errors out via `ErrMissingEnv` if either is missing/empty.
+
+Verified with throwaway tests (deleted after, using `t.Setenv` for
+per-test env isolation): missing `DATABASE_URL` → error; missing
+`JWT_SECRET` → error; both present → `Config` populated correctly.
+`go build ./internal/...` and `go vet ./internal/...` both clean.
+
+Note: `.env`-file loading (e.g. via `godotenv`) deliberately not
+added — `os.LookupEnv` only reads real process environment variables,
+so local runs need vars exported in the shell for now. Flagged as a
+possible later addition, not required.
+
+Not yet wired anywhere — nothing calls `Load()` yet (no `main.go`).
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. `internal/config` — load the Postgres connection string and JWT
-   secret from environment variables instead of hardcoding/passing
-   them as bare parameters.
-2. Router composition refactor — change the four `NewRouterX` functions
+1. Router composition refactor — change the four `NewRouterX` functions
    from "each builds its own `*http.ServeMux`" to "each registers
    routes onto a `*http.ServeMux` passed in", so `main.go` can build
    one shared mux across all four domains (resolves the deferred

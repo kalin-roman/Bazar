@@ -149,3 +149,6 @@
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/internal/http/middleware/auth.go","success":true,"timestamp":1788391380834,"sessionId":null}
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/internal/http/middleware/verify_temp_test.go","success":true,"timestamp":1788391393753,"sessionId":null}
 {"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1788391423037,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/internal/config/config.go","success":true,"timestamp":1788394001175,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/internal/config/verify_temp_test.go","success":true,"timestamp":1788394010055,"sessionId":null}
+{"type":"edit","file":"/home/roman-kalin/Project/Bazar/Bazar/docs/GO_LEARNING_LOG.md","success":true,"timestamp":1788394026764,"sessionId":null}
