@@ -977,20 +977,49 @@ possible later addition, not required.
 
 Not yet wired anywhere — nothing calls `Load()` yet (no `main.go`).
 
+### ✅ Router composition refactor
+
+All four `router.go` files (`categoryhttp`/`listinghttp`/`orderhttp`/
+`userhttp`) changed from "each builds its own `*http.ServeMux`" to
+"each registers its route onto a `*http.ServeMux` passed in" —
+`RegisterRouter(mux *http.ServeMux, h *HandlesService)`. Fully
+user-written, applied consistently across all four files each round
+(good sign — the mechanical part landed immediately once explained).
+
+One real bug caught in review, same shape in all four on the first
+pass: `mux http.ServeMux` (by value, not `*http.ServeMux`) — since
+`ServeMux` holds internal state (its pattern map), passing by value
+meant each function registered its route on a private copy, invisible
+to the caller's actual mux. Compiled fine, `go vet` didn't catch it —
+same "valid but semantically wrong" category as the earlier `pgx`
+`Scan`-without-`&` bug. Fixed by switching to `*http.ServeMux` in all
+four. Also a naming typo (`RegisterdRouter` → `RegisterRouter`) fixed
+after being carried through two rounds.
+
+Verified with a throwaway test (deleted after): built one shared
+`http.NewServeMux()`, called all four domains' `RegisterRouter` on it,
+confirmed via `mux.Handler(req)` that `GET /categories`, `/listings`,
+`/orders`, `/users` all resolve correctly on the *same* mux, and an
+unregistered path doesn't match — proves the actual composition works,
+not just that each file compiles individually. (Handlers were
+constructed with `nil` repositories since only routing/pattern-matching
+was being tested, never actual handler invocation — no database
+needed.) `go build ./internal/...` and `go vet ./internal/...` both
+clean.
+
+This resolves the "4 separate muxes don't compose into one
+`http.Server`" question that's been deferred since the `listing`
+lesson.
+
 ### Not started yet
 
 Remaining core lessons, roughly in order:
-1. Router composition refactor — change the four `NewRouterX` functions
-   from "each builds its own `*http.ServeMux`" to "each registers
-   routes onto a `*http.ServeMux` passed in", so `main.go` can build
-   one shared mux across all four domains (resolves the deferred
-   "4 separate muxes don't compose into one `http.Server`" question).
-3. `cmd/server/main.go` — wiring everything together into an actual
+1. `cmd/server/main.go` — wiring everything together into an actual
    running server: config → `db.New` pool → all four
    repo/service/handler stacks → one shared mux → wrap in `Logging` +
    `Auth` middleware → `http.ListenAndServe`. Then smoke-test live
    against real Postgres end-to-end, same as every other piece.
-4. `internal/platform/{logger,database,middleware}` — optional
+2. `internal/platform/{logger,database,middleware}` — optional
    organizational polish, not functionally required.
 
 `PORTFOLIO.md` was updated to reflect all of the above as of this

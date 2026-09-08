@@ -2,8 +2,6 @@ package userhttp
 
 import "net/http"
 
-func NewRouter(h *HandlesService) *http.ServeMux {
-	mux := http.NewServeMux()
+func RegisterRouter(mux *http.ServeMux, h *HandlesService) {
 	mux.HandleFunc("GET /users", h.List)
-	return mux
 }
