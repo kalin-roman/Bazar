@@ -43,7 +43,7 @@ func (r *UserRepository) List(ctx context.Context) ([]user.User, error) {
 	return users, nil
 }
 
-func (r *UserRepository) GetByID(ctx context.Context, id int64) (user.User, error) {
+func (r *UserRepository) GetByID(ctx context.Context, id string) (user.User, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
 		"select id, full_name, email, age, address_delivery, avatar from users where id = $1",
 		id)
@@ -61,8 +61,8 @@ func (r *UserRepository) GetByID(ctx context.Context, id int64) (user.User, erro
 
 func (r *UserRepository) Create(ctx context.Context, u user.User) (user.User, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
-		"insert into users (full_name, email, age, address_delivery, avatar) values ($1, $2, $3, $4, $5) returning id",
-		u.FullName, u.Email, u.Age, u.AddressDelivery, u.Avatar,
+		"insert into users (id, full_name, email, age, address_delivery, avatar) values ($1, $2, $3, $4, $5, $6) returning id",
+		u.ID, u.FullName, u.Email, u.Age, u.AddressDelivery, u.Avatar,
 	)
 
 	if err := row.Scan(&u.ID); err != nil {

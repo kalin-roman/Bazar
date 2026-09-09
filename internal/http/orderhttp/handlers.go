@@ -2,8 +2,11 @@ package orderhttp
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
+	"strconv"
 
+	"github.com/kalin-roman/Bazar/internal/http/middleware"
 	"github.com/kalin-roman/Bazar/internal/order"
 )
 
@@ -24,4 +27,36 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(orders) // writing in JSON
+}
+
+func (h *HandlesService) GetByID(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	valueID := r.PathValue("id")
+	parseInInt, errPars := strconv.ParseInt(valueID, 10, 64)
+	if errPars != nil {
+		w.WriteHeader(http.StatusBadRequest)
+		return
+	}
+
+	o, err := h.OrderService.GetByID(ctx, parseInInt)
+	if errors.Is(err, order.ErrNotFound) {
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+	if err != nil {
+		w.WriteHeader(http.StatusInternalServerError) // some other, unexpected failure
+		return
+	}
+
+	userID, ok := middleware.UserIDFromContext(ctx)
+	if !ok || userID != o.UserID {
+		// Same status as the not-found case above, deliberately — an
+		// order that exists but isn't yours looks identical to one
+		// that doesn't exist at all, so ownership can't be probed.
+		w.WriteHeader(http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(o)
 }

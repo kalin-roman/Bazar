@@ -1,5 +1,7 @@
 # Bazar
 
+[![Go](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml)
+
 A full-stack mobile marketplace project: a React Native / Expo frontend
 paired with a Go backend built from scratch, by hand, as a structured
 learning project in backend engineering and Go.
@@ -45,12 +47,35 @@ project actually demonstrates and its current state.
   algorithm) rather than trusting the token's own header — verified
   with tests covering a valid token, an expired token, a wrong-secret
   token, and a forged `alg:none` token.
-- **Hand-rolled middleware**: the `net/http.Handler`
-  wrap-and-delegate pattern (no framework middleware system), currently
-  demonstrated with a request-logging middleware; an auth-checking
-  middleware is designed (closure-based, to carry a secret; propagates
-  the verified user ID via `context.WithValue` using an unexported key
-  type to avoid collisions) and is the next piece to implement.
+- **Hand-rolled middleware, composed deliberately**: the
+  `net/http.Handler` wrap-and-delegate pattern (no framework middleware
+  system) — a request-logging middleware and a closure-based
+  auth-checking middleware (carries a secret, propagates the verified
+  user ID via `context.WithValue` using an unexported key type to avoid
+  collisions), wired together in a specific, understood order: auth
+  runs outermost, so a request with a missing/invalid token is rejected
+  before the logging middleware ever sees it — verified live via the
+  running server's own log output, not just by reading the code.
+- **A fully wired, live-tested server**: `cmd/server/main.go` composes
+  every layer above — config, DB pool, all four domains'
+  repository/service/handler stacks, one shared `http.ServeMux`, and
+  the middleware chain — into one running `http.Server`. Proven with a
+  real end-to-end smoke test against live Postgres: all four domains
+  correctly return `401` for missing/invalid tokens and `200` for a
+  valid one.
+- **Authorization, not just authentication**: both `order.GetByID` and
+  `user.GetByID` check that the verified requester (from the JWT)
+  actually owns the resource being fetched, not just that they're
+  logged in. A `404` (not `403`) is returned for both "doesn't exist"
+  and "exists but isn't yours," deliberately — avoiding resource
+  enumeration (confirming an ID exists to someone who shouldn't see
+  it), the same reasoning GitHub uses for private repos. Verified live
+  with two distinct users' JWTs against a real running server, for
+  both domains: the owner gets `200`, a different authenticated user
+  gets the identical `404` a nonexistent resource would return.
+- **CI**: a GitHub Actions workflow runs `go build`, `go vet`, a
+  `gofmt` check, and `go test` on every push/PR — verified green
+  against a real run, not just written and assumed.
 - **A modern React Native app**: Expo Router v6 file-based routing,
   TypeScript throughout, Zustand for client state, Supabase for auth
   and persistence (frontend side).
@@ -77,10 +102,11 @@ Bazar/
 │       ├── listinghttp/                 # Handler + router for /listings
 │       ├── orderhttp/                    # Handler + router for /orders
 │       ├── userhttp/                      # Handler + router for /users
-│       └── middleware/                     # Hand-rolled net/http middleware (logging; auth designed, not yet written)
+│       └── middleware/                     # Hand-rolled net/http middleware (logging, JWT auth)
 ├── migrations/                  # Hand-written SQL schema migrations (golang-migrate)
 ├── db/                           # Postgres connection pool setup (pgx)
-├── cmd/server/                    # Entry point — not wired up yet
+├── internal/config/                # Env-var config loading
+├── cmd/server/                    # Entry point — wired up, runs a real server
 └── docs/GO_LEARNING_LOG.md          # Lesson-by-lesson build log
 ```
 
@@ -116,26 +142,37 @@ Each backend domain package follows the same shape:
   against a real Postgres instance in both directions.
 - JWT verification (`internal/auth`), including the algorithm-confusion
   defense, covered by tests.
-- First hand-rolled middleware (request logging), proving the pattern.
+- Both hand-rolled middlewares (request logging, JWT auth-checking),
+  composed together in a deliberate order.
+- Env-var-based config loading (`internal/config`).
+- All four domains' routers composed onto one shared `http.ServeMux`.
+- `cmd/server/main.go` — fully wired: config → DB pool → all four
+  domains' repository/service/handler stacks → shared mux → middleware
+  chain → running `http.Server`. Live end-to-end proof: every domain
+  correctly returns `401` for a missing/invalid token and `200` for a
+  valid one, confirmed against a real running Postgres instance.
+
+- Authorization on `order.GetByID` and `user.GetByID` — ownership
+  checks between the verified user and the requested resource,
+  live-tested with two distinct users against a real running server,
+  for both domains.
+- CI (GitHub Actions: build/vet/gofmt/test on every push/PR), green
+  and running.
 
 **In progress:**
-- Auth middleware — design finalized, not yet implemented.
-- Composing the four domains' independent routers into a single
-  `http.Handler` a real `http.Server` can serve (currently each domain
-  builds its own separate `*http.ServeMux`; these don't yet merge into
-  one).
-- `internal/config` and `internal/platform/{logger,database,middleware}`.
-- `cmd/server/main.go` — wiring everything into an actual running
-  server. This is the last major step; once it's in, the backend goes
-  from "a set of proven, independently-tested pieces" to "a server you
-  can actually run and hit with curl."
+- `internal/platform/{logger,database,middleware}` — optional
+  organizational polish (regrouping existing, already-working pieces),
+  not functionally required.
+- Authorization covers `order`/`user`; `category`/`listing` have no
+  owner concept to check (not user-scoped resources), so there's
+  nothing analogous needed there.
 
 **Not started:**
 - Reconnecting the frontend to a live backend instead of mock data.
+- Actually deploying the backend somewhere reachable.
 
-In short: this is an active work-in-progress. Every layer of the
-backend — domain logic, persistence, HTTP, auth verification, and the
-middleware pattern — has been built and independently proven (tests,
-or live validation against a real Postgres instance), but the final
-assembly step that turns those proven pieces into one running server
-hasn't happened yet.
+In short: the backend's core roadmap is complete and live-proven —
+domain logic, persistence, HTTP, auth verification, the middleware
+chain, real authorization checks on every user-owned resource, and CI
+are all in place. What's left is optional polish, deployment, and the
+separate, larger effort of reconnecting the frontend.

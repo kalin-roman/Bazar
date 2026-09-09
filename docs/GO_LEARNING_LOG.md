@@ -1011,21 +1011,421 @@ This resolves the "4 separate muxes don't compose into one
 `http.Server`" question that's been deferred since the `listing`
 lesson.
 
+### ✅ `cmd/server/main.go` — wiring everything together (backend complete)
+
+The final assembly lesson: config → `db.New` pool → all four
+repo/service/handler stacks → one shared mux → middleware chain →
+`http.ListenAndServe`. Mostly user-written, several review rounds, each
+catching a different real bug — good sign this landed as understanding
+rather than memorized syntax:
+
+1. **Config**: `cfg, err := config.Load()` — the only nit was the local
+   var originally named `config`, shadowing the imported package (same
+   habit flagged a few times before). Renamed to `cfg`.
+2. **DB pool**: first attempt called `db.New(ctx, cfg.ConnectionString)`
+   as a bare statement, discarding both return values — compiled fine
+   (Go allows ignoring a call's results, unlike an unused *declared*
+   variable) but meant a connection failure would silently do nothing
+   and no pool existed for anything downstream. Same bug shape as the
+   `auth.VerifyToken`-return-values-discarded bug from the middleware
+   lesson. Fixed: `pool, err := db.New(...)`, checked, then
+   `defer pool.Close()` placed after the check (not before — closing a
+   possibly-`nil` pool on the failure path would be wrong).
+3. **Four repo/service/handler stacks**: `category` explained in full
+   detail first (why each constructor's output type is exactly the
+   next one's required input — `*pgxpool.Pool` → `Repository` → the
+   service only needing the `Repository` interface → the handler only
+   needing `*Service`), then user wrote `listing`/`order`/`user`
+   themselves by reading each domain's own real constructor names
+   out of its own files. One real bug along the way: `user`'s second
+   line was left as `userSrv := user` — a bare package reference isn't
+   a valid expression (Go package identifiers only work with dot
+   syntax), and the `internal/user` import was missing entirely. Not a
+   naming collision as first suspected — just an incomplete line.
+   Fixed: added the import, completed the call
+   (`user.NewService(userRepo)`).
+4. **Shared mux + registration**: `mux := http.NewServerMux()` — the
+   exact `ServerMux`/`ServeMux` typo from the very first `categoryhttp`
+   router lesson, recurring. Also `routerCat :=
+   categoryhttp.RegisterRouter(mux, categoryHandler)` — `RegisterRouter`
+   has no return value (it mutates `mux` in place, the whole point of
+   the router-composition refactor), so assigning its result doesn't
+   compile. Both fixed; all four domains registered onto one `mux` with
+   bare calls, no assignment.
+5. **Middleware chain — real conceptual sticking point, worth recording
+   in detail.** First draft: `handler = middleware.Auth(...)(handler)`
+   then `handler = middleware.Logging(handler)`, with the stated
+   reasoning "Auth should be first, we need to validate before working
+   with it." That order actually makes `Logging` outermost (last wrap
+   = outermost = runs first on a real request) — the *opposite* of what
+   was intended by "first." Walked through both functions' real bodies,
+   inlined, to show concretely: wrap order in source is nesting order,
+   not execution order — the outermost wrapper's pre-`next` code runs
+   first, and only calling `next` reaches the layer(s) inside it. This
+   took a couple of passes (a written trace through `Logging(Auth(mux))`
+   vs `Auth(Logging(mux))`, then a live before/after `curl` comparison)
+   before it genuinely clicked, not just "I did what you said" —
+   there's a real difference between explaining a rule and building the
+   mental model for *why* the rule is true, and this one needed the
+   concrete inline-substitution version, echoing the same "anchor
+   against a working example" lesson noted back in the auth-middleware
+   closure lesson. User then deliberately chose `Auth` outermost
+   (`Auth(Logging(mux))`) — meaning rejected requests (missing/invalid
+   token) never reach `Logging` and leave no log line at all, only
+   successful requests get timed/logged. A real, understood trade-off,
+   not an accident (the opposite choice — log every attempt, including
+   rejected ones, useful for spotting abuse — was explicitly named as
+   the alternative and not chosen).
+6. **Server start**: `log.Fatal(http.ListenAndServe(":8080", handler))`
+   — Claude wrote this exact line directly (explicit request). Port is
+   hardcoded for now, not sourced from `Config` — flagged as an easy
+   later addition (a `Port` field read via `os.LookupEnv("PORT")`,
+   same pattern as `ConnectionString`/`JWTSecret`) if ever wanted.
+
+Every added block/line above got the same "why is this line here"
+comment treatment as earlier sections, written directly into
+`main.go` itself (not just this log) at the user's request, so the
+file is self-explanatory on a fresh read without needing this log open
+side-by-side.
+
+**Live, end-to-end proof — not a throwaway harness this time, the real
+`main.go`:** started the real `Bazar` Postgres container, exported
+`DATABASE_URL`/`JWT_SECRET`, ran `go run ./cmd/server`, generated a
+throwaway HS256 JWT signed with the same secret (temp generator script,
+deleted after — same disposable-harness pattern used throughout this
+project), then swept all four domains (`/categories`, `/listings`,
+`/orders`, `/users`) × three cases each (no token, garbage token, valid
+token) — 12 requests total. Result: every domain correctly returned
+`401` for the two rejected cases and `200` for the valid one; response
+bodies were well-formed JSON (`null` for the still-empty tables,
+correct). Server's own log output confirmed the middleware-order
+decision live, not just by tracing code: exactly 6 log lines total, one
+per successful request, and *zero* of the 8 rejected requests appeared
+in the log at all.
+
+One incidental fix along the way: `.env` existed at the repo root but
+was **not** excluded by `.gitignore` (only `.env*.local` was) — a real
+secret-leak risk once real `DATABASE_URL`/`JWT_SECRET` values ever
+land in it. Added plain `.env` to `.gitignore`. Also confirmed:
+`config.Load()` still only reads real process env vars via
+`os.LookupEnv`, no `.env`-file loading exists (`godotenv` or similar)
+— noted again as optional, not required.
+
+**This completes the core backend roadmap (items 1–9 from the original
+plan).** All four domains have: domain types, `Repository`/`Service`,
+fake-backed tests, real validated `pgx` implementations, HTTP
+handlers/routers, and are now actually served by one running
+`http.Server` with a JWT-gated middleware chain in front of them —
+proven live, not just compiled.
+
+### ✅ Authorization — ownership check on `order`'s `GetByID`
+
+Not part of the original 9-item roadmap — came up naturally once
+authentication existed: a verified, logged-in user could still fetch
+*anyone's* order by ID, since nothing checked whether the requested
+resource actually belonged to them. Authentication (`Auth` middleware,
+"who is this?") and authorization ("are they allowed to do *this*?")
+are different questions, and only the first one existed before this
+lesson.
+
+**Design decision #1 — surfaced immediately, before any code:**
+`Order.UserID` was `int64` (matching this DB's own `users.id`), but
+`middleware.UserIDFromContext` returns Supabase's UUID as a `string` —
+incomparable types, the exact "reconciling `User.ID` with Supabase's
+UUID" nit flagged back at the `internal/user` lesson, now actually
+blocking. Options discussed: change `Order.UserID` to `string`
+(simpler comparison, decouples `orders` from the local `users` table)
+vs. keep it `int64` and translate the JWT's UUID via a `user` lookup
+(keeps `User.ID` untouched, more layers). Chose the first — `Order`
+stores the Supabase identity directly, `users.id` is untouched and
+stays whatever `internal/user` needs it for.
+
+**Migration `000005_alter_orders_user_id`** — first `ALTER TABLE`
+migration in the project (every prior one was `CREATE TABLE`). Two new
+pieces of syntax taught: `DROP CONSTRAINT <name>` (constraint names
+auto-generated by Postgres when not given explicitly follow
+`<table>_<column>_fkey` — confirmed against the real name via `\d
+orders` on the live container rather than assumed) and `ALTER COLUMN
+... TYPE ... USING ...` (the `USING` clause tells Postgres how to
+convert existing values to the new type). `up.sql` drops the FK to
+`users(id)` then changes `user_id` to `text`; `down.sql` reverses both
+in reverse order. User-written after the concepts were explained, two
+typos caught in review (`ordres` table-name typo, `foreing key`
+keyword typo) — both mechanical, not conceptual. Full round-trip
+validated live: `up` → schema inspected via `\d orders` (FK gone,
+column now `text`) → `down` → schema inspected again (exact original
+schema restored, including the same constraint name) → `up` again,
+left in the working state the rest of the lesson needed.
+
+**Go-side propagation** — `Order.UserID int64 → string`
+(`internal/order/order.go`), `Create`'s validation
+(`internal/order/service.go`: `o.UserID == 0` → `o.UserID == ""`,
+same zero-value-check pattern, new type), and
+`internal/order/service_test.go`'s fake-repository fixtures/table
+cases. One real slip along the way, caught by `go vet` before it ran:
+two `t.Fatalf` calls still used the `%d` formatting verb for `UserID`
+after it became a `string` — same "format verb must match the actual
+argument's type" class of bug as the much-earlier `category`
+repository's `Println`-instead-of-`Printf` mistake. Claude fixed
+those two lines directly (explicit request). Separately, a real
+conflation happened and was caught before it compiled cleanly: an
+attempt to also change `Repository.GetByID`'s `id` parameter from
+`int64` to `string` — wrong, that `id` is the order's own primary key
+(`orders.id`, unrelated to `UserID`/ownership), and doing so broke the
+`var _ order.Repository = (*OrderRepository)(nil)` interface-assertion
+check in `internal/storage/postgres/order.go`, plus cascading errors
+into the not-yet-written HTTP handler. Reverted (Claude fixed directly
+after being asked to undo it) — good concrete illustration of why that
+interface-assertion check exists: it caught a real, easy-to-make
+mistake immediately rather than letting it surface later as a runtime
+bug.
+
+`internal/storage/postgres/order.go` needed **zero code changes** —
+predicted in advance (pgx just needs the Go variable's type to match
+the column's type, and both sides now agreed after the migration) and
+then actually confirmed via a live temp harness (`Create` with a
+realistic-looking Supabase UUID string → `GetByID` → round-tripped
+correctly), not just assumed. Same disposable-harness/cleanup pattern
+as every prior live-Postgres check in this log.
+
+**Design decision #2 — `404` vs `403` for "exists, but isn't yours."**
+User raised the tradeoff independently, without being told the term
+for it first: `403` is more semantically honest (says what happened),
+`404` avoids **resource enumeration** (confirming a given ID exists at
+all to someone who shouldn't be able to see it — the same reasoning
+GitHub uses for private repos). Chose `404`, deliberately, for both
+"doesn't exist" and "exists but isn't yours" — same status code either
+way, so the two are indistinguishable from outside.
+
+**`orderhttp/handlers.go`'s `GetByID`** — new syntax taught: Go 1.22
+path-parameter routing (`"GET /orders/{id}"`, read via
+`r.PathValue("id")`, always a `string`) and `strconv.ParseInt` to
+convert it, with its own `400`-on-malformed-input branch (new
+territory: previously the only client-input-shaped errors were
+domain-validation ones like `ErrInvalid`, not literally-unparseable
+input). Several real rounds, worth recording since each caught a
+different thing:
+- The exact shadowing bug flagged as a *risk* the first time (naming
+  the local var `order`, shadowing the imported package) actually
+  materialized the moment `order.ErrNotFound` was needed a few lines
+  later — `order.Order has no field or method ErrNotFound`, since the
+  reference resolved to the local struct value, not the package.
+  Renamed to `o`.
+- A pasted-in scaffold (given as a fill-in-the-blank template — see
+  below) got applied with its `/* ... */` placeholder comments left in
+  verbatim as if they were values, and separately lost the
+  already-working ID-parsing block entirely in the process — both
+  needed rebuilding, a good reminder that pasting a scaffold isn't the
+  same as completing it.
+- `http.StatusBad` (not a real constant — reaching for `404`),
+  `w.Header().Set()` called with no arguments (incomplete, not yet
+  wrong), and the ownership-check plumbing (`middleware.UserIDFromContext`,
+  the missing `middleware` import, comparing against `o.UserID`) were
+  all still unwritten at that point.
+- After a fill-in-the-blank scaffold approach still didn't fully land,
+  user explicitly asked Claude to write it directly ("write it instead
+  of me" — one-off exception, see `teach-dont-implement-learning-code`
+  memory). Final version: parse → `400` on failure → fetch → `404` on
+  `order.ErrNotFound` → `500` on any other error → ownership check
+  (`middleware.UserIDFromContext`, `404` on mismatch or missing context
+  value, same status as not-found, with a comment explaining why) →
+  `200` + JSON on success.
+
+`orderhttp/router.go` — user-written, one line
+(`mux.HandleFunc("GET /orders/{id}", h.GetByID)`), no issues, clean
+mirror of the existing `List` registration.
+
+**Live end-to-end proof, not just build+vet**: seeded one order owned
+by `alice-uuid` against the real `Bazar` Postgres container, generated
+two throwaway JWTs (one `sub: alice-uuid`, one `sub: bob-uuid`), ran
+the real server, and checked 5 scenarios — Alice fetching her own
+order (`200`), Bob fetching Alice's order (`404`), Alice fetching a
+nonexistent order (`404`, same status as Bob's case — the actual point
+of the design decision, proven not just asserted), no token at all
+(`401`, rejected by `Auth` before this handler ever runs), and a
+malformed ID (`400`). All 5 passed. Cleaned up (server killed, seeded
+rows deleted, temp harness removed) after.
+
+This completes authorization as a real, working, live-tested feature —
+the one genuinely new concept identified as worth adding beyond the
+original 9-item roadmap.
+
+### ✅ CI — GitHub Actions
+
+Not learning-gated (infra/tooling, same category as installing
+`migrate` or running `go build`/`go vet` directly throughout this
+log) — Claude wrote `.github/workflows/go.yml` directly. Runs on every
+push/PR to `main`: `go build ./...`, `go vet ./...`, a `gofmt -l .`
+check (new, wasn't being checked before), `go test ./...`. Uses
+`go-version-file: go.mod` rather than a hardcoded Go version, so it
+always matches whatever `go.mod` says without needing a separate
+update. No Postgres service container needed — nothing in the test
+suite touches a live database directly (`internal/storage/postgres`
+has no `_test.go` files).
+
+Verified all four steps pass locally before pushing (not assumed).
+Pushed, confirmed live via a browser check of the real Actions page —
+green on the first real run (`Go #1`, 43s). Added a status badge to
+the top of `PORTFOLIO.md`, linking to the real workflow, added only
+after confirming the first run had actually gone green (not before).
+Both the workflow and the badge are committed and pushed to
+`origin/main`.
+
+### ✅ Authorization — extended to `user` (`GetByID`, ownership check)
+
+Same lesson shape as `order`'s authorization work, applied to the
+other domain that has an identity of its own to protect — a user
+should only be able to fetch their own profile, not anyone else's.
+Starting point mirrored `order` almost exactly: `user.Service.GetByID`
+already existed at the service/repository layer, no HTTP handler for
+it yet.
+
+**Design decision — surfaced immediately, same shape as `order`'s ID
+mismatch, but genuinely different this time.** `User.ID` was still
+`int64` (the very field whose own comment said `// For future instead
+of the ID I should change it on the UUID from the Supabase` — this
+lesson is that "future"). Unlike `order`, there's no separate "owner
+field" to decouple here — the authorization check *is* "does this
+row's own identity match the requester's," so whatever gets compared
+against `middleware.UserIDFromContext` has to be `User`'s own identity
+directly. User asked whether adding a *second* field (`SupabaseID`,
+keeping `ID int64` as an internal PK) would violate SQL normalization
+— a good, legitimate question, answered no: normalization is about
+functional dependencies between columns, not about how many unique
+identifier columns a table has; a surrogate key + natural key
+coexisting on one table is a common, named, non-violating pattern.
+Chose to change `User.ID` itself to `string` anyway (matching the
+comment's original intent) rather than add a second field — helped by
+a fact specific to this point in the project: `orders_user_id_fkey`
+was the *only* foreign key anywhere referencing `users.id`, and it was
+already dropped in `000005`, so this change had almost no schema
+ripple left to worry about.
+
+**Migration `000006_alter_users_id`** — a real step up from `000005`,
+new wrinkle: `users.id` was `serial`, not a plain `integer` — shorthand
+for "`integer` with a `nextval(...)` auto-increment default." Changing
+the type without first handling that default would leave it trying to
+call an integer-sequence function on a `text` column. New syntax
+taught: `ALTER COLUMN ... DROP DEFAULT` before the type change; no
+`DROP CONSTRAINT` needed this time (unlike `orders.user_id`) since a
+primary key constraint doesn't care what type the column holds. `down.sql`
+reverses both, restoring the exact original default by reattaching the
+still-existing `users_id_seq` sequence (confirmed its real name via
+`\d users` first, same discipline as confirming the FK constraint name
+in `000005`, rather than assumed). Claude wrote both files directly
+(explicit request) — full round-trip validated live against the real
+container (up → schema inspected → down → schema inspected, exact
+original restored → up again), same as every migration in this log.
+
+**A real, non-obvious consequence flagged before any code was
+touched**: dropping that default means `users.id` is no longer
+auto-generated by Postgres at all — whoever calls `Create` must now
+supply the Supabase UUID themselves. This directly broke
+`postgres/user.go`'s existing `Create`, which relied entirely on
+`returning id` to invent a value.
+
+**One contrast worth restating, since it's the mirror image of a
+mistake from the `order` lesson**: there, changing `GetByID`'s `id`
+parameter type was *wrong* (that `id` was `Order`'s own unrelated PK,
+not `UserID`). Here, changing `Repository.GetByID(ctx, id int64)` to
+`string` is *correct* — because `user`'s own `ID` **is** the thing
+becoming the Supabase identity. Surface-identical edit, opposite
+correctness, because the concept `id` refers to differs between the
+two packages — the exact kind of thing that's easy to pattern-match
+past without actually checking.
+
+**Go-side propagation**, `int64 → string`: `user.go`, `service.go`
+(both `Repository.GetByID` and `Service.GetByID`'s own signatures —
+user needed the reminder that *both* need updating, same gap as the
+`order` lesson), and `service_test.go`'s fixtures. Along the way, user
+independently decided (prompted by "should `Create` validate this
+now") to add `o.ID == ""` to `Create`'s validation, matching the
+`order.UserID` zero-value-check pattern — since `ID` is now
+caller-supplied rather than DB-generated, an empty one should be
+caught at the service layer with a clear `ErrInvalid`, not surface
+later as an opaque database `not null` violation. Claude added that
+one line directly (explicit request). Consequence caught immediately
+by the test suite (not a bug — expected): `TestServiceCreate/valid`'s
+fixture had never set `ID` and started failing against the new rule;
+fixed by adding an `ID` to the fixture, not by loosening the check.
+
+**`postgres/user.go`'s `Create` — two real, sequential runtime-only
+bugs, both invisible to `go build`/`go vet`, both caught before
+running (once by review, once by actually re-checking after review
+said "fixed"), same "SQL is just a string to the compiler" category as
+several earlier bugs in this log:**
+1. First pass only changed `GetByID`'s signature; `Create` was left
+   completely untouched — still not including `id` in the `insert`
+   at all, which would have failed at runtime the instant it ran
+   (`not null` violation, no default left to fall back on). Caught by
+   review before ever being run.
+2. Second pass added `id` to the column list and `u.ID` to the
+   argument list, but left the placeholder list one short: 6 columns,
+   6 arguments, only 5 `$N` placeholders — the exact same
+   column-list/placeholder-count mismatch bug category as `listing`'s
+   repository lesson much earlier in this log (there it was 6/7; here
+   6/5). `go build`/`go vet` both passed clean at this point — SQL
+   argument counts aren't something the Go compiler checks. Caught by
+   review, not tooling.
+
+Both fixed, then **actually proven live** rather than trusted: a
+temporary harness `Create`d a user with a realistic Supabase-style
+UUID, `GetByID`'d it back, confirmed the round-trip, cleaned up after
+— same disposable-harness pattern as every other live check in this
+log. This is the second domain in a row (`order` was the first) where
+the interface-satisfaction check and live verification caught real
+bugs the type system alone couldn't.
+
+**`userhttp/handlers.go`'s `GetByID` + `router.go`** — Claude wrote
+directly (explicit request), same shape as `order`'s but genuinely
+simpler: no `strconv.ParseInt` needed at all, since `id` is a string
+UUID straight off the path, not an integer PK requiring conversion.
+Same `404`-for-both-not-found-and-wrong-owner design (confirmed as
+still the intended behavior, consistent with `order`'s decision),
+compared directly against `u.ID` (no separate owner field to look up,
+unlike `order`'s `o.UserID`).
+
+**Live end-to-end proof**: seeded one user (`alice-uuid`) against the
+real container, ran the real server, hit it with two distinct users'
+JWTs. First pass returned `401` across the board unexpectedly — not a
+code bug: the tokens being reused were left over from the `order`
+lesson's live check, generated with a 1-hour expiry that had already
+elapsed by this point in the session. Regenerated fresh tokens,
+re-ran: Alice fetching her own profile (`200`), Bob fetching Alice's
+profile (`404`), Alice fetching a nonexistent user (`404`, same status
+as Bob's case), no token (`401`). All correct. Cleaned up (server
+killed, seeded row deleted, harness removed) after — worth remembering
+for future live-token tests in a long session: check token freshness
+before assuming a code regression when everything unexpectedly 401s.
+
+Both domains with a real identity to protect (`order`, `user`) now
+have live-proven authorization. `category`/`listing` have no owner
+concept to check (not user-scoped resources), so there's nothing
+analogous to add there.
+
 ### Not started yet
 
-Remaining core lessons, roughly in order:
-1. `cmd/server/main.go` — wiring everything together into an actual
-   running server: config → `db.New` pool → all four
-   repo/service/handler stacks → one shared mux → wrap in `Logging` +
-   `Auth` middleware → `http.ListenAndServe`. Then smoke-test live
-   against real Postgres end-to-end, same as every other piece.
-2. `internal/platform/{logger,database,middleware}` — optional
-   organizational polish, not functionally required.
+- `internal/platform/{logger,database,middleware}` — optional
+  organizational polish (moving existing pieces into a
+  `platform`-style layout), not functionally required; everything it
+  would reorganize already exists and works.
+- Actually deploying the backend somewhere reachable — still flagged
+  as probably the single highest-leverage remaining item for
+  portfolio purposes, not started.
+- Reconnecting the frontend to this now-real backend instead of static
+  mock data — separate, larger, not learning-gated.
+- The pre-existing deferred nits, still open: `Order.Total()`,
+  `OrderItem.Price` → `PriceCents` rename.
+- Nothing from this `user`-authorization lesson (migration 000006, the
+  `user` package changes, the new `GetByID` handler/route) is
+  committed to git yet — explicitly held back at user's request, same
+  as the `order` lesson before it was committed. Note: the `order`
+  authorization work (migration 000005, etc.) and the CI workflow
+  *are* both committed and pushed at this point — only this most
+  recent `user` lesson is being held back.
 
-`PORTFOLIO.md` was updated to reflect all of the above as of this
-point (auth verification + middleware pattern + this auth middleware
-all done; router composition, config, and `main.go` wiring still
-ahead) — kept in sync with this log, not left stale.
+`PORTFOLIO.md` was updated to reflect CI + the extended authorization
+coverage — kept in sync with this log, not left stale.
 
 Deferred/optional polish, not blocking, revisit if relevant later:
 - `Order.Total()` method (sum `Price * Quantity` across `Items`).

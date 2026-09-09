@@ -20,7 +20,7 @@ func (r *fakeRepository) List(ctx context.Context) ([]User, error) {
 	return r.users, nil
 }
 
-func (r *fakeRepository) GetByID(ctx context.Context, id int64) (User, error) {
+func (r *fakeRepository) GetByID(ctx context.Context, id string) (User, error) {
 	for _, u := range r.users {
 		if u.ID == id {
 			return u, nil
@@ -36,8 +36,8 @@ func (r *fakeRepository) Create(ctx context.Context, u User) (User, error) {
 
 func TestServiceList(t *testing.T) {
 	repo := &fakeRepository{users: []User{
-		{ID: 1, FullName: "Ada Lovelace"},
-		{ID: 2, FullName: "Grace Hopper"},
+		{ID: "1", FullName: "Ada Lovelace"},
+		{ID: "2", FullName: "Grace Hopper"},
 	}}
 	s := NewService(repo)
 
@@ -52,18 +52,18 @@ func TestServiceList(t *testing.T) {
 
 func TestServiceGetByID(t *testing.T) {
 	repo := &fakeRepository{users: []User{
-		{ID: 1, FullName: "Ada Lovelace"},
+		{ID: "1", FullName: "Ada Lovelace"},
 	}}
 	s := NewService(repo)
 
 	tests := []struct {
 		name         string
-		id           int64
+		id           string
 		wantFullName string
 		wantErr      error
 	}{
-		{name: "found", id: 1, wantFullName: "Ada Lovelace"},
-		{name: "missing", id: 99, wantErr: errNotFound},
+		{name: "found", id: "1", wantFullName: "Ada Lovelace"},
+		{name: "missing", id: "99", wantErr: errNotFound},
 	}
 
 	for _, tc := range tests {
@@ -87,6 +87,7 @@ func TestServiceGetByID(t *testing.T) {
 
 func TestServiceCreate(t *testing.T) {
 	valid := User{
+		ID:       "user-1",
 		FullName: "Ada Lovelace",
 		Email:    "ada@example.com",
 	}

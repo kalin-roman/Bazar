@@ -36,8 +36,8 @@ func (r *fakeRepository) Create(ctx context.Context, o Order) (Order, error) {
 
 func TestServiceList(t *testing.T) {
 	repo := &fakeRepository{orders: []Order{
-		{ID: 1, UserID: 1},
-		{ID: 2, UserID: 2},
+		{ID: 1, UserID: "1"},
+		{ID: 2, UserID: "2"},
 	}}
 	s := NewService(repo)
 
@@ -52,17 +52,17 @@ func TestServiceList(t *testing.T) {
 
 func TestServiceGetByID(t *testing.T) {
 	repo := &fakeRepository{orders: []Order{
-		{ID: 1, UserID: 1},
+		{ID: 1, UserID: "1"},
 	}}
 	s := NewService(repo)
 
 	tests := []struct {
 		name       string
 		id         int64
-		wantUserID int64
+		wantUserID string
 		wantErr    error
 	}{
-		{name: "found", id: 1, wantUserID: 1},
+		{name: "found", id: 1, wantUserID: "1"},
 		{name: "missing", id: 99, wantErr: errNotFound},
 	}
 
@@ -79,7 +79,7 @@ func TestServiceGetByID(t *testing.T) {
 				t.Fatalf("GetByID returned error: %v", err)
 			}
 			if got.UserID != tc.wantUserID {
-				t.Fatalf("got UserID %d, want %d", got.UserID, tc.wantUserID)
+				t.Fatalf("got UserID %s, want %s", got.UserID, tc.wantUserID)
 			}
 		})
 	}
@@ -87,7 +87,7 @@ func TestServiceGetByID(t *testing.T) {
 
 func TestServiceCreate(t *testing.T) {
 	valid := Order{
-		UserID: 1,
+		UserID: "1",
 		Items: []OrderItem{
 			{ListingID: 1, Price: 1000, Quantity: 2},
 		},
@@ -104,7 +104,7 @@ func TestServiceCreate(t *testing.T) {
 		},
 		{
 			name:    "no user",
-			mutate:  func(o Order) Order { o.UserID = 0; return o },
+			mutate:  func(o Order) Order { o.UserID = ""; return o },
 			wantErr: ErrInvalid,
 		},
 		{
@@ -166,7 +166,7 @@ func TestServiceCreate(t *testing.T) {
 				t.Fatalf("Create returned error: %v", err)
 			}
 			if got.UserID != valid.UserID {
-				t.Fatalf("got UserID %d, want %d", got.UserID, valid.UserID)
+				t.Fatalf("got UserID %s, want %s", got.UserID, valid.UserID)
 			}
 			if len(repo.orders) != 1 {
 				t.Fatalf("expected Create to store the order in the repository")

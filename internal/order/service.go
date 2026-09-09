@@ -31,7 +31,7 @@ func (s *Service) GetByID(ctx context.Context, id int64) (Order, error) {
 }
 
 func (s *Service) Create(ctx context.Context, o Order) (Order, error) {
-	if o.UserID == 0 || len(o.Items) == 0 {
+	if o.UserID == "" || len(o.Items) == 0 {
 		return Order{}, ErrInvalid
 	}
 	for _, item := range o.Items {

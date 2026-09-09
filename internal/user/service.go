@@ -10,7 +10,7 @@ var ErrNotFound = errors.New("user: not found")
 
 type Repository interface {
 	List(ctx context.Context) ([]User, error)
-	GetByID(ctx context.Context, id int64) (User, error)
+	GetByID(ctx context.Context, id string) (User, error)
 	Create(ctx context.Context, o User) (User, error)
 }
 
@@ -26,12 +26,12 @@ func (s *Service) List(ctx context.Context) ([]User, error) {
 	return s.Repository.List(ctx)
 }
 
-func (s *Service) GetByID(ctx context.Context, id int64) (User, error) {
+func (s *Service) GetByID(ctx context.Context, id string) (User, error) {
 	return s.Repository.GetByID(ctx, id)
 }
 
 func (s *Service) Create(ctx context.Context, o User) (User, error) {
-	if len(o.FullName) == 0 || len(o.Email) == 0 {
+	if o.ID == "" || len(o.FullName) == 0 || len(o.Email) == 0 {
 		return User{}, ErrInvalid
 	}
 
