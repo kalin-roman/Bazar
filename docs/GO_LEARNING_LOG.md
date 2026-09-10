@@ -1403,32 +1403,149 @@ have live-proven authorization. `category`/`listing` have no owner
 concept to check (not user-scoped resources), so there's nothing
 analogous to add there.
 
-### Not started yet
+### Git history cleanup, then CI verified pushed
 
-- `internal/platform/{logger,database,middleware}` — optional
-  organizational polish (moving existing pieces into a
-  `platform`-style layout), not functionally required; everything it
-  would reorganize already exists and works.
-- Actually deploying the backend somewhere reachable — still flagged
-  as probably the single highest-leverage remaining item for
-  portfolio purposes, not started.
-- Reconnecting the frontend to this now-real backend instead of static
-  mock data — separate, larger, not learning-gated.
-- The pre-existing deferred nits, still open: `Order.Total()`,
-  `OrderItem.Price` → `PriceCents` rename.
-- Nothing from this `user`-authorization lesson (migration 000006, the
-  `user` package changes, the new `GetByID` handler/route) is
-  committed to git yet — explicitly held back at user's request, same
-  as the `order` lesson before it was committed. Note: the `order`
-  authorization work (migration 000005, etc.) and the CI workflow
-  *are* both committed and pushed at this point — only this most
-  recent `user` lesson is being held back.
+The `user`-authorization commit ended up made directly by the user
+(not through Claude), separately from the `order` lesson's commit —
+both are real, deliberate commits, not an accident. Around the same
+time: the user asked to remove 4 specific commits from `origin/main`
+only, keeping local history untouched — done via
+`git push --force origin <target-sha>:main` (no local `git reset`
+needed, so local history was never at risk). Confirmed after: local
+`main` unchanged, `origin/main` reverted to the target commit.
 
-`PORTFOLIO.md` was updated to reflect CI + the extended authorization
-coverage — kept in sync with this log, not left stale.
+Follow-up: asked whether Claude's `Co-Authored-By`/`Claude-Session`
+commit trailers could be removed, and separately what that session
+link actually does (it's just a URL in the commit message pointing at
+this claude.ai session — GitHub doesn't host the conversation, it only
+renders the link). Resolved by squashing the affected local-only
+commits (safe to rewrite — none were on any remote at that point) into
+one clean commit, authored as the user, no Claude trailers anywhere,
+diff verified byte-identical to the sum of the originals before
+pushing. Pushed; CI (from the earlier CI lesson) confirmed green on
+the new commit via a live check of the Actions page, not assumed.
 
-Deferred/optional polish, not blocking, revisit if relevant later:
+### 🔧 Deployment — in progress, blocked mid-attempt
+
+Real infra decisions, discussed rather than assumed: hosting platform
+and where the production database lives. Started with Fly.io (Docker
+build + `fly.toml`, both written and validated — the image built
+locally and a running container correctly served real requests against
+local Postgres via `host.docker.internal`) + reusing the existing
+Supabase project's Postgres (rather than standing up a second
+database) — but Fly.io requires a credit card even for its free
+allowance, which the user didn't want to provide, so switched to
+**Render** instead (no card required at signup, git-connected, no CLI
+needed) — `fly.toml` removed, `Dockerfile`/`.dockerignore` kept as-is
+(work Render too).
+
+User is driving the actual Render dashboard setup themselves, Claude
+guiding. Real error hit and diagnosed: Render's service was created
+with Runtime auto-detected as native "Go" instead of "Docker," so it
+ignored the `Dockerfile` entirely and tried its own default Go build
+command against the repo root — which has no `.go` files directly in
+it (the real `main` package lives in `cmd/server/`), hence
+`no Go files in .../Bazar`. Fix identified (switch Runtme to Docker in
+service settings, or recreate the service selecting Docker explicitly)
+but not yet confirmed working — mid-troubleshooting, current build
+still failing with only a generic "Exited with status 1" notice and no
+detailed log pasted back yet. **Picking back up here next.**
+
+One real gotcha flagged for later, not yet addressed: if the Supabase
+**pooler** connection string is used (recommended over the direct
+connection for a pooled server like this), PgBouncer's transaction
+mode doesn't support `pgx`'s prepared-statement caching by default —
+may need `pool_config.ConnConfig.DefaultQueryExecMode =
+pgx.QueryExecModeSimpleProtocol` added to `db.New` to avoid subtle
+runtime errors under load. Not urgent until deployment is actually
+running against Supabase.
+
+### ✅ `Listing` renamed to `Product` throughout
+
+Not a new concept — a naming change, done directly by Claude (explicit
+request, and the scope — 20+ files, package renames, SQL table
+renames — was confirmed as reasonable for Claude to do rather than
+hand-edit). Came up because the user asked what `Listing`/`Order`
+"mean" and then asked to rename them to `Product`/`Basket`. `Order` →
+`Basket` was flagged as a real semantic mismatch before doing
+anything — "basket" conventionally means a pre-checkout cart, not a
+completed purchase (which is what `Order` actually models: frozen
+`Price`/`Quantity` at time of purchase, tied to a `UserID`) — user
+agreed and kept `Order` as-is. Only `Listing` → `Product` proceeded.
+
+**Note for anyone reading this log from the top**: every earlier entry
+above still says `listing`/`Listing` — that's intentionally left
+as-is, since this log is a historical record of what was actually
+built and taught at the time, not rewritten retroactively (same
+principle as never editing an already-applied migration). `Product` is
+the current, correct name as of this entry onward.
+
+Scope of the rename:
+- `internal/listing/` → `internal/product/` (package, `Listing` type →
+  `Product`, `ErrInvalid`/`ErrNotFound` messages, all method
+  signatures, the fake-repository test file).
+- `internal/http/listinghttp/` → `internal/http/producthttp/` (`GET
+  /listings` → `GET /products`). Incidental fix while renaming: the
+  original handler's `List` method had a local variable named
+  `listing`, shadowing the imported package — same recurring habit
+  flagged several times earlier in this log. Renamed to `products`
+  while touching the file anyway.
+- `internal/storage/postgres/listing.go` → `.../product.go`
+  (`ListingRepository` → `ProductRepository`, SQL table `listings` →
+  `products`).
+- `OrderItem.ListingID` → `ProductID` — included in scope since it
+  directly references the renamed concept; left as `ListingID` would
+  have been an inconsistent half-rename. Touched `order.go`,
+  `order/service.go`, `order/service_test.go` (including a stale test
+  case name, `"item with no listing"` → `"item with no product"`), and
+  `postgres/order.go`'s SQL (`order_items.listing_id` column, `Scan`
+  destination, insert statement).
+- `cmd/server/main.go` — imports, variable names
+  (`listingRepo`/`Svc`/`Handler` → `productRepo`/`Svc`/`Handler`),
+  constructor calls, comments, the `RegisterRouter` call.
+- **New migration `000007_rename_listings_to_products`** — first
+  migration in this project using `RENAME TO`/`RENAME COLUMN` rather
+  than `CREATE`/`ALTER ... TYPE`. Two-stage build: the first pass only
+  renamed the tables/columns themselves, which left every underlying
+  constraint/index/sequence name still carrying the old `listing`
+  naming (`listings_pkey`, `listings_id_seq`,
+  `order_items_listing_id_fkey`, etc.) — `RENAME TO`/`RENAME COLUMN`
+  don't touch those. Caught by inspecting `\d products` after the
+  first live-validated `up`, not by a bug — just noticed the result
+  looked inconsistent for a project that's otherwise been deliberate
+  about naming. Extended the migration to also `RENAME
+  CONSTRAINT`/`RENAME SEQUENCE` every affected object. Since the
+  first (incomplete) version had already been applied and recorded in
+  `schema_migrations` before the extension was written, had to
+  manually revert the live schema to its pre-migration state and
+  `migrate ... force 6` to reset the bookkeeping before the corrected
+  file could be applied cleanly through `migrate` again — worth
+  remembering: editing a migration file after it's already been
+  applied locally needs the live state and the tracking table brought
+  back in sync manually, same idea as never editing an
+  already-*shared* migration, just encountered here in a local-only
+  context. Full round-trip validated after the fix: `up` (every
+  constraint/sequence/index now honestly named `products`/
+  `product_images`, no `listing` artifacts left anywhere) → `down`
+  (exact original schema restored, byte-for-byte, including the old
+  names) → `up` again.
+- `PORTFOLIO.md` updated throughout (package list, architecture
+  diagram, prose) to say `product`/`Product` — this file describes
+  current state, unlike this log, so it *is* fully updated, not left
+  historical.
+
+Verification: `go build`/`go vet`/`gofmt -l .`/`go test ./...` all
+clean across the whole module after every Go-side change, mirroring
+CI's own checks exactly.
+
+### Deferred/optional polish, not blocking, revisit if relevant later
+
 - `Order.Total()` method (sum `Price * Quantity` across `Items`).
-- Reconciling `User.ID` (`int64`) with Supabase's UUID-based identity.
 - Renaming `OrderItem.Price` → `PriceCents`, matching the SQL column
   and the rest of the codebase's naming convention.
+- `internal/platform/{logger,database,middleware}` — optional
+  organizational polish, not functionally required.
+- Reconnecting the frontend to this now-real backend instead of static
+  mock data — separate, larger, not learning-gated.
+- The Supabase-pooler/`pgx` prepared-statement gotcha noted above,
+  once deployment is actually running against Supabase.

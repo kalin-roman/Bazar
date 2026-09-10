@@ -9,12 +9,12 @@ import (
 	"github.com/kalin-roman/Bazar/internal/category"
 	"github.com/kalin-roman/Bazar/internal/config"
 	"github.com/kalin-roman/Bazar/internal/http/categoryhttp"
-	"github.com/kalin-roman/Bazar/internal/http/listinghttp"
 	"github.com/kalin-roman/Bazar/internal/http/middleware"
 	"github.com/kalin-roman/Bazar/internal/http/orderhttp"
+	"github.com/kalin-roman/Bazar/internal/http/producthttp"
 	"github.com/kalin-roman/Bazar/internal/http/userhttp"
-	"github.com/kalin-roman/Bazar/internal/listing"
 	"github.com/kalin-roman/Bazar/internal/order"
+	"github.com/kalin-roman/Bazar/internal/product"
 	"github.com/kalin-roman/Bazar/internal/storage/postgres"
 	"github.com/kalin-roman/Bazar/internal/user"
 )
@@ -54,18 +54,18 @@ func main() {
 	// or the Repository directly.
 	categoryHandler := categoryhttp.NewCategoriesService(categorySvc)
 
-	// listing part
+	// product part
 
-	// Talks to Postgres directly via pool. Satisfies listing.Repository —
+	// Talks to Postgres directly via pool. Satisfies product.Repository —
 	// nothing above this line knows or cares that it's pgx underneath.
-	listingRepo := postgres.NewListingRepository(pool)
+	productRepo := postgres.NewProductRepository(pool)
 	// Only knows the Repository interface, not pgx/pool at all. Holds
 	// the validation + business logic (e.g. Create's field checks).
-	listingSvc := listing.NewService(listingRepo)
-	// Only knows *listing.Service. Translates HTTP requests into
+	productSvc := product.NewService(productRepo)
+	// Only knows *product.Service. Translates HTTP requests into
 	// service calls and writes JSON responses — never touches the DB
 	// or the Repository directly.
-	listingHandler := listinghttp.NewListingService(listingSvc)
+	productHandler := producthttp.NewProductService(productSvc)
 
 	// Order part
 
@@ -106,7 +106,7 @@ func main() {
 	//                      methods (e.g. List) actually get called once a
 	//                      request matches the registered pattern.
 	categoryhttp.RegisterRouter(mux, categoryHandler)
-	listinghttp.RegisterRouter(mux, listingHandler)
+	producthttp.RegisterRouter(mux, productHandler)
 	orderhttp.RegisterRouter(mux, orderHandler)
 	userhttp.RegisterRouter(mux, userHandler)
 

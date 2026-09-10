@@ -18,7 +18,7 @@ project actually demonstrates and its current state.
   error handling (sentinel errors checked via `errors.Is`, wrapped with
   `%w`), and Go's naming/casing conventions.
 - **The Repository/Service pattern, applied consistently**: all four
-  domain packages (`listing`, `category`, `order`, `user`) separate
+  domain packages (`product`, `category`, `order`, `user`) separate
   business logic (`Service`) from persistence (`Repository`, an
   interface owned by the consumer) — the service layer has no idea
   whether it's talking to a real database or a test double.
@@ -28,7 +28,7 @@ project actually demonstrates and its current state.
   domains.
 - **Schema design and real persistence**: hand-written SQL migrations
   (`golang-migrate`), including a deliberate normalization decision —
-  storing listing images in their own table rather than a denormalized
+  storing product images in their own table rather than a denormalized
   array column, specifically to support per-image editing/ordering
   later — plus real `pgx`-backed `Repository` implementations for all
   four domains, each validated end-to-end against a live Postgres
@@ -91,7 +91,7 @@ project actually demonstrates and its current state.
 Bazar/
 ├── web/                       # React Native / Expo frontend (see README.md)
 ├── internal/
-│   ├── listing/                # Listing domain type + Repository/Service + tests
+│   ├── product/                # Product domain type + Repository/Service + tests
 │   ├── category/                # Category domain type + Repository/Service + tests
 │   ├── order/                    # Order domain type + Repository/Service + tests
 │   ├── user/                      # User domain type + Repository/Service + tests
@@ -99,7 +99,7 @@ Bazar/
 │   ├── storage/postgres/            # Real pgx-backed Repository implementations, one file per domain
 │   └── http/
 │       ├── categoryhttp/               # Handler + router for /categories
-│       ├── listinghttp/                 # Handler + router for /listings
+│       ├── producthttp/                 # Handler + router for /products
 │       ├── orderhttp/                    # Handler + router for /orders
 │       ├── userhttp/                      # Handler + router for /users
 │       └── middleware/                     # Hand-rolled net/http middleware (logging, JWT auth)
@@ -111,7 +111,7 @@ Bazar/
 ```
 
 Each backend domain package follows the same shape:
-- A plain struct with no framework annotations (`Listing`, `Category`,
+- A plain struct with no framework annotations (`Product`, `Category`,
   `Order`, `User`).
 - A `Repository` interface defining what persistence operations are
   needed — owned by the consumer (the domain package), not by whatever
@@ -133,11 +133,11 @@ Each backend domain package follows the same shape:
   categories, orders). Supabase auth code exists and is fully
   functional but currently disconnected by design, so every screen is
   reachable without signing in during frontend development.
-- Backend, all four domains (`listing`, `category`, `order`, `user`):
+- Backend, all four domains (`product`, `category`, `order`, `user`):
   domain types, `Repository`/`Service` layers, full fake-backed test
   suites, real `pgx` `Repository` implementations validated against
   live Postgres, and HTTP handlers + routers.
-- All four SQL migrations (`categories`; `listings` + `listing_images`;
+- All SQL migrations (`categories`; `products` + `product_images`;
   `users`; `orders` + `order_items`), applied and rolled back cleanly
   against a real Postgres instance in both directions.
 - JWT verification (`internal/auth`), including the algorithm-confusion
@@ -163,7 +163,7 @@ Each backend domain package follows the same shape:
 - `internal/platform/{logger,database,middleware}` — optional
   organizational polish (regrouping existing, already-working pieces),
   not functionally required.
-- Authorization covers `order`/`user`; `category`/`listing` have no
+- Authorization covers `order`/`user`; `category`/`product` have no
   owner concept to check (not user-scoped resources), so there's
   nothing analogous needed there.
 

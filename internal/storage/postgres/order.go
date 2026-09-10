@@ -23,7 +23,7 @@ func NewOrderRepository(pool *pgxpool.Pool) *OrderRepository {
 // itemsForOrder fetches the line items belonging to a single order.
 func (r *OrderRepository) itemsForOrder(ctx context.Context, orderID int64) ([]order.OrderItem, error) {
 	rows, err := r.ConnectionPool.Query(ctx,
-		"select listing_id, price_cents, quantity from order_items where order_id = $1",
+		"select product_id, price_cents, quantity from order_items where order_id = $1",
 		orderID,
 	)
 	if err != nil {
@@ -34,7 +34,7 @@ func (r *OrderRepository) itemsForOrder(ctx context.Context, orderID int64) ([]o
 	var items []order.OrderItem
 	for rows.Next() {
 		var item order.OrderItem
-		if err := rows.Scan(&item.ListingID, &item.Price, &item.Quantity); err != nil {
+		if err := rows.Scan(&item.ProductID, &item.Price, &item.Quantity); err != nil {
 			return nil, fmt.Errorf("list order items: %w", err)
 		}
 		items = append(items, item)
@@ -121,8 +121,8 @@ func (r *OrderRepository) Create(ctx context.Context, o order.Order) (order.Orde
 
 	for _, item := range o.Items {
 		_, err := tx.Exec(ctx,
-			"insert into order_items (order_id, listing_id, price_cents, quantity) values ($1, $2, $3, $4)",
-			o.ID, item.ListingID, item.Price, item.Quantity,
+			"insert into order_items (order_id, product_id, price_cents, quantity) values ($1, $2, $3, $4)",
+			o.ID, item.ProductID, item.Price, item.Quantity,
 		)
 		if err != nil {
 			return order.Order{}, fmt.Errorf("create order item: %w", err)

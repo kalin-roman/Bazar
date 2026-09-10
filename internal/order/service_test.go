@@ -89,7 +89,7 @@ func TestServiceCreate(t *testing.T) {
 	valid := Order{
 		UserID: "1",
 		Items: []OrderItem{
-			{ListingID: 1, Price: 1000, Quantity: 2},
+			{ProductID: 1, Price: 1000, Quantity: 2},
 		},
 	}
 
@@ -113,9 +113,9 @@ func TestServiceCreate(t *testing.T) {
 			wantErr: ErrInvalid,
 		},
 		{
-			name: "item with no listing",
+			name: "item with no product",
 			mutate: func(o Order) Order {
-				o.Items = []OrderItem{{ListingID: 0, Price: 1000, Quantity: 1}}
+				o.Items = []OrderItem{{ProductID: 0, Price: 1000, Quantity: 1}}
 				return o
 			},
 			wantErr: ErrInvalid,
@@ -123,7 +123,7 @@ func TestServiceCreate(t *testing.T) {
 		{
 			name: "item with zero quantity",
 			mutate: func(o Order) Order {
-				o.Items = []OrderItem{{ListingID: 1, Price: 1000, Quantity: 0}}
+				o.Items = []OrderItem{{ProductID: 1, Price: 1000, Quantity: 0}}
 				return o
 			},
 			wantErr: ErrInvalid,
@@ -131,7 +131,7 @@ func TestServiceCreate(t *testing.T) {
 		{
 			name: "item with negative quantity",
 			mutate: func(o Order) Order {
-				o.Items = []OrderItem{{ListingID: 1, Price: 1000, Quantity: -1}}
+				o.Items = []OrderItem{{ProductID: 1, Price: 1000, Quantity: -1}}
 				return o
 			},
 			wantErr: ErrInvalid,
@@ -139,7 +139,7 @@ func TestServiceCreate(t *testing.T) {
 		{
 			name: "item with negative price",
 			mutate: func(o Order) Order {
-				o.Items = []OrderItem{{ListingID: 1, Price: -1, Quantity: 1}}
+				o.Items = []OrderItem{{ProductID: 1, Price: -1, Quantity: 1}}
 				return o
 			},
 			wantErr: ErrInvalid,

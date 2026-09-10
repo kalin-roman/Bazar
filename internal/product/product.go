@@ -1,6 +1,6 @@
-package listing
+package product
 
-type Listing struct {
+type Product struct {
 	ID           int64
 	CategoryID   int64 // foreign key to link to the categories
 	Title        string

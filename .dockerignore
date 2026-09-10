@@ -1,0 +1,10 @@
+web/
+.git/
+.github/
+.claude/
+.claude-flow/
+docs/
+migrations/
+*.md
+.env
+.env*.local
