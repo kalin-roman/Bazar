@@ -3,6 +3,7 @@ package orderhttp
 import (
 	"encoding/json"
 	"errors"
+	"log"
 	"net/http"
 	"strconv"
 
@@ -22,6 +23,7 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	orders, err := h.OrderService.List(ctx)
 	if err != nil {
+		log.Println("orderhttp: List:", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -44,7 +46,8 @@ func (h *HandlesService) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError) // some other, unexpected failure
+		log.Println("orderhttp: GetByID:", err) // some other, unexpected failure
+		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
 

@@ -2,6 +2,7 @@ package categoryhttp
 
 import (
 	"encoding/json"
+	"log"
 	"net/http"
 
 	"github.com/kalin-roman/Bazar/internal/category"
@@ -19,6 +20,7 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	category, err := h.CatService.List(ctx)
 	if err != nil {
+		log.Println("categoryhttp: List:", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
