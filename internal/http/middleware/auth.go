@@ -17,7 +17,7 @@ func UserIDFromContext(ctx context.Context) (string, bool) {
 	return userID, ok
 }
 
-func Auth(secret string) func(http.Handler) http.Handler {
+func Auth(verifier *auth.Verifier) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authorized := r.Header.Get("Authorization")
@@ -27,7 +27,7 @@ func Auth(secret string) func(http.Handler) http.Handler {
 			}
 			token := strings.TrimPrefix(authorized, "Bearer ")
 
-			userID, err := auth.VerifyToken(token, secret)
+			userID, err := verifier.VerifyToken(token)
 			if err != nil {
 				w.WriteHeader(http.StatusUnauthorized)
 				return

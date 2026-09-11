@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/kalin-roman/Bazar/db"
+	"github.com/kalin-roman/Bazar/internal/auth"
 	"github.com/kalin-roman/Bazar/internal/category"
 	"github.com/kalin-roman/Bazar/internal/config"
 	"github.com/kalin-roman/Bazar/internal/http/categoryhttp"
@@ -35,6 +36,15 @@ func main() {
 
 	if err != nil {
 		log.Fatal(err) // can't serve anything without a working DB pool — stop immediately, same reasoning as above
+	}
+
+	// Fetches Supabase's public signing key(s) once, at startup — same
+	// fail-fast reasoning as everything above: nothing can verify a
+	// single request without this, so a fetch failure here should stop
+	// the server rather than let every request fail individually later.
+	verifier, err := auth.NewVerifier(cfg.JWKSURL)
+	if err != nil {
+		log.Fatal(err)
 	}
 	// Runs when main() returns (any path), so the pool always gets
 	// released cleanly instead of leaking connections.
@@ -122,7 +132,7 @@ func main() {
 	// request with a missing/invalid token gets rejected with 401 here,
 	// before Logging (or mux) ever sees it — so only requests that pass
 	// Auth get timed/logged. Deliberate trade-off, see the log for why.
-	handler = middleware.Auth(cfg.JWTSecret)(handler)
+	handler = middleware.Auth(verifier)(handler)
 
 	// Blocks here for as long as the server runs. Only returns once it
 	// stops — either from a real failure (e.g. port already in use) or

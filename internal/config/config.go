@@ -10,7 +10,7 @@ var ErrMissingEnv = errors.New("config: missing required environment variable")
 
 type Config struct {
 	ConnectionString string
-	JWTSecret        string
+	JWKSURL          string
 }
 
 func Load() (*Config, error) {
@@ -19,13 +19,13 @@ func Load() (*Config, error) {
 		return nil, fmt.Errorf("%w: DATABASE_URL", ErrMissingEnv)
 	}
 
-	jwtSecret, ok := os.LookupEnv("JWT_SECRET")
-	if !ok || jwtSecret == "" {
-		return nil, fmt.Errorf("%w: JWT_SECRET", ErrMissingEnv)
+	jwksURL, ok := os.LookupEnv("JWKS_URL")
+	if !ok || jwksURL == "" {
+		return nil, fmt.Errorf("%w: JWKS_URL", ErrMissingEnv)
 	}
 
 	return &Config{
 		ConnectionString: connString,
-		JWTSecret:        jwtSecret,
+		JWKSURL:          jwksURL,
 	}, nil
 }
