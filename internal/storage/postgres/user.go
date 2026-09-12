@@ -22,7 +22,7 @@ func NewUserRepository(pool *pgxpool.Pool) *UserRepository {
 
 func (r *UserRepository) List(ctx context.Context) ([]user.User, error) {
 	rows, err := r.ConnectionPool.Query(ctx,
-		"select id, full_name, email, age, address_delivery, avatar from users")
+		"select id, full_name, email, age, address_delivery, avatar from app_users")
 	if err != nil {
 		return nil, fmt.Errorf("list users: %w", err)
 	}
@@ -45,7 +45,7 @@ func (r *UserRepository) List(ctx context.Context) ([]user.User, error) {
 
 func (r *UserRepository) GetByID(ctx context.Context, id string) (user.User, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
-		"select id, full_name, email, age, address_delivery, avatar from users where id = $1",
+		"select id, full_name, email, age, address_delivery, avatar from app_users where id = $1",
 		id)
 
 	var u user.User
@@ -61,7 +61,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id string) (user.User, err
 
 func (r *UserRepository) Create(ctx context.Context, u user.User) (user.User, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
-		"insert into users (id, full_name, email, age, address_delivery, avatar) values ($1, $2, $3, $4, $5, $6) returning id",
+		"insert into app_users (id, full_name, email, age, address_delivery, avatar) values ($1, $2, $3, $4, $5, $6) returning id",
 		u.ID, u.FullName, u.Email, u.Age, u.AddressDelivery, u.Avatar,
 	)
 

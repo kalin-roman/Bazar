@@ -1,6 +1,6 @@
 create table orders(
     id serial primary key,
-    user_id integer not null references users(id)
+    user_id integer not null references app_users(id)
 );
 
 create table order_items(
