@@ -3,10 +3,10 @@ package userhttp
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 
-	"github.com/kalin-roman/Bazar/internal/http/middleware"
+	"github.com/kalin-roman/Bazar/internal/platform/logger"
+	"github.com/kalin-roman/Bazar/internal/platform/middleware"
 	"github.com/kalin-roman/Bazar/internal/user"
 )
 
@@ -22,7 +22,7 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	users, err := h.UserService.List(ctx)
 	if err != nil {
-		log.Println("userhttp: List:", err)
+		logger.Error("userhttp: List", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -43,7 +43,7 @@ func (h *HandlesService) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Println("userhttp: GetByID:", err)
+		logger.Error("userhttp: GetByID", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

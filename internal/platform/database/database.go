@@ -1,4 +1,4 @@
-package db
+package database
 
 import (
 	"context"
@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-var ErrInvalid = errors.New("db: invalid connection pool")
+var ErrInvalid = errors.New("database: invalid connection pool")
 
 func New(ctx context.Context, connString string) (*pgxpool.Pool, error) {
 	pool, err := pgxpool.New(ctx, connString)

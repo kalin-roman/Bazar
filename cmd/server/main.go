@@ -5,16 +5,16 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/kalin-roman/Bazar/db"
 	"github.com/kalin-roman/Bazar/internal/auth"
 	"github.com/kalin-roman/Bazar/internal/category"
 	"github.com/kalin-roman/Bazar/internal/config"
 	"github.com/kalin-roman/Bazar/internal/http/categoryhttp"
-	"github.com/kalin-roman/Bazar/internal/http/middleware"
 	"github.com/kalin-roman/Bazar/internal/http/orderhttp"
 	"github.com/kalin-roman/Bazar/internal/http/producthttp"
 	"github.com/kalin-roman/Bazar/internal/http/userhttp"
 	"github.com/kalin-roman/Bazar/internal/order"
+	"github.com/kalin-roman/Bazar/internal/platform/database"
+	"github.com/kalin-roman/Bazar/internal/platform/middleware"
 	"github.com/kalin-roman/Bazar/internal/product"
 	"github.com/kalin-roman/Bazar/internal/storage/postgres"
 	"github.com/kalin-roman/Bazar/internal/user"
@@ -32,7 +32,7 @@ func main() {
 		log.Fatal(err) // config.Load already failed, nothing downstream can work without it — stop immediately
 	}
 
-	pool, err := db.New(ctx, cfg.ConnectionString) // to opecn connection to the connection pool with the certaing key
+	pool, err := database.New(ctx, cfg.ConnectionString) // to opecn connection to the connection pool with the certaing key
 
 	if err != nil {
 		log.Fatal(err) // can't serve anything without a working DB pool — stop immediately, same reasoning as above

@@ -2,9 +2,9 @@ package producthttp
 
 import (
 	"encoding/json"
-	"log"
 	"net/http"
 
+	"github.com/kalin-roman/Bazar/internal/platform/logger"
 	"github.com/kalin-roman/Bazar/internal/product"
 )
 
@@ -20,7 +20,7 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	products, err := h.ProductService.List(ctx)
 	if err != nil {
-		log.Println("producthttp: List:", err)
+		logger.Error("producthttp: List", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

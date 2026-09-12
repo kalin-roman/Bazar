@@ -3,12 +3,12 @@ package orderhttp
 import (
 	"encoding/json"
 	"errors"
-	"log"
 	"net/http"
 	"strconv"
 
-	"github.com/kalin-roman/Bazar/internal/http/middleware"
 	"github.com/kalin-roman/Bazar/internal/order"
+	"github.com/kalin-roman/Bazar/internal/platform/logger"
+	"github.com/kalin-roman/Bazar/internal/platform/middleware"
 )
 
 type HandlesService struct {
@@ -23,7 +23,7 @@ func (h *HandlesService) List(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	orders, err := h.OrderService.List(ctx)
 	if err != nil {
-		log.Println("orderhttp: List:", err)
+		logger.Error("orderhttp: List", err)
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}
@@ -46,7 +46,7 @@ func (h *HandlesService) GetByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if err != nil {
-		log.Println("orderhttp: GetByID:", err) // some other, unexpected failure
+		logger.Error("orderhttp: GetByID", err) // some other, unexpected failure
 		w.WriteHeader(http.StatusInternalServerError)
 		return
 	}

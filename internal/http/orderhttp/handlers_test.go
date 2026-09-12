@@ -8,8 +8,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/kalin-roman/Bazar/internal/http/middleware"
 	"github.com/kalin-roman/Bazar/internal/order"
+	"github.com/kalin-roman/Bazar/internal/platform/middleware"
 )
 
 // fakeRepository is a minimal in-memory order.Repository, just enough
