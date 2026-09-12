@@ -47,10 +47,11 @@ func (r *OrderRepository) itemsForOrder(ctx context.Context, orderID int64) ([]o
 }
 
 func (r *OrderRepository) GetByID(ctx context.Context, id int64) (order.Order, error) {
-	row := r.ConnectionPool.QueryRow(ctx, "select id, user_id from orders where id = $1", id)
+	row := r.ConnectionPool.QueryRow(ctx,
+		"select id, user_id, status, created_at from orders where id = $1", id)
 
 	var o order.Order
-	if err := row.Scan(&o.ID, &o.UserID); err != nil {
+	if err := row.Scan(&o.ID, &o.UserID, &o.Status, &o.CreatedAt); err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return order.Order{}, order.ErrNotFound
 		}
@@ -67,7 +68,7 @@ func (r *OrderRepository) GetByID(ctx context.Context, id int64) (order.Order, e
 }
 
 func (r *OrderRepository) List(ctx context.Context) ([]order.Order, error) {
-	rows, err := r.ConnectionPool.Query(ctx, "select id, user_id from orders")
+	rows, err := r.ConnectionPool.Query(ctx, "select id, user_id, status, created_at from orders")
 	if err != nil {
 		return nil, fmt.Errorf("list orders: %w", err)
 	}
@@ -76,7 +77,7 @@ func (r *OrderRepository) List(ctx context.Context) ([]order.Order, error) {
 	var orders []order.Order
 	for rows.Next() {
 		var o order.Order
-		if err := rows.Scan(&o.ID, &o.UserID); err != nil {
+		if err := rows.Scan(&o.ID, &o.UserID, &o.Status, &o.CreatedAt); err != nil {
 			return nil, fmt.Errorf("list orders: %w", err)
 		}
 		orders = append(orders, o)
@@ -112,10 +113,13 @@ func (r *OrderRepository) Create(ctx context.Context, o order.Order) (order.Orde
 	// so it's safe to defer unconditionally.
 	defer tx.Rollback(ctx)
 
+	// status/created_at aren't supplied here — the columns' own
+	// defaults ('Pending', now()) apply, and returning reads back
+	// whatever Postgres actually set, rather than guessing at it here.
 	if err := tx.QueryRow(ctx,
-		"insert into orders (user_id) values ($1) returning id",
+		"insert into orders (user_id) values ($1) returning id, status, created_at",
 		o.UserID,
-	).Scan(&o.ID); err != nil {
+	).Scan(&o.ID, &o.Status, &o.CreatedAt); err != nil {
 		return order.Order{}, fmt.Errorf("create order: %w", err)
 	}
 

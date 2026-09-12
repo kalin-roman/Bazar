@@ -29,6 +29,15 @@ func (r *fakeRepository) GetBySlug(ctx context.Context, slug string) (Product, e
 	return Product{}, errNotFound
 }
 
+func (r *fakeRepository) GetByID(ctx context.Context, id int64) (Product, error) {
+	for _, p := range r.products {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return Product{}, errNotFound
+}
+
 func (r *fakeRepository) Create(ctx context.Context, p Product) (Product, error) {
 	r.products = append(r.products, p)
 	return p, nil

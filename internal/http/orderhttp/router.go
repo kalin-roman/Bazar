@@ -5,4 +5,5 @@ import "net/http"
 func RegisterRouter(mux *http.ServeMux, h *HandlesService) {
 	mux.HandleFunc("GET /orders", h.List)
 	mux.HandleFunc("GET /orders/{id}", h.GetByID)
+	mux.HandleFunc("POST /orders", h.Create)
 }

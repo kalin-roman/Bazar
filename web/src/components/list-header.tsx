@@ -2,14 +2,18 @@ import { FontAwesome } from "@expo/vector-icons";
 import { Link } from "expo-router";
 
 import { FlatList,TouchableOpacity ,Image, Pressable, StyleSheet, Text, View } from "react-native";
-import { CATEGORIES } from "../../assets/categories";
 import { useCartStore } from "../store/cart-store";
+import { useCatalogStore } from "../store/catalog-store";
 import { useAuth } from "../provider/auth-provider";
 
 export const ListHeader = () => {
 
     const { getItemCount } = useCartStore();
     const { user, signOut } = useAuth();
+    const { categories } = useCatalogStore();
+    // Supabase's real User has no display-name field, only email —
+    // the mock provider used to fabricate one the same way.
+    const displayName = user?.email?.split("@")[0] ?? "there";
 
     return (
         <View style={[styles.headerContainer]}>
@@ -20,7 +24,7 @@ export const ListHeader = () => {
                             source={{ uri: 'https://placehold.co/40.png' }}
                             style={styles.avatarImage}
                         />
-                        <Text style={styles.avatarText}>Hello {user?.name ?? "there"}</Text>
+                        <Text style={styles.avatarText}>Hello {displayName}</Text>
                     </View>
                 </View>
                 <View style={styles.headerRight}>
@@ -55,19 +59,19 @@ export const ListHeader = () => {
         <View style={styles.categoriesContainer}>
             <Text style={styles.sectionTitle}>Categories</Text>
             <FlatList
-            data={CATEGORIES}
+            data={categories}
             renderItem={({item}) => (
-                <Link asChild href={`/categories/${item.slug}`}>
+                <Link asChild href={`/categories/${item.Slug}`}>
                 <Pressable style={styles.category}>
-                    <Image 
-                        source={{uri: item.imageUrl}} 
-                        style={styles.categoryImage} 
+                    <Image
+                        source={{uri: item.ImageURL}}
+                        style={styles.categoryImage}
                     />
-                    <Text style={styles.categoryText}>{item.name}</Text>
+                    <Text style={styles.categoryText}>{item.Name}</Text>
                 </Pressable>
                 </Link>
             )}
-            keyExtractor={item => item.name}
+            keyExtractor={item => item.Slug}
             horizontal
             showsHorizontalScrollIndicator={false}
             />

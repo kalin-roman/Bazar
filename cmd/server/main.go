@@ -85,10 +85,11 @@ func main() {
 	// Only knows the Repository interface, not pgx/pool at all. Holds
 	// the validation + business logic (e.g. Create's field checks).
 	orderSvc := order.NewService(orderRepo)
-	// Only knows *order.Service. Translates HTTP requests into
-	// service calls and writes JSON responses — never touches the DB
-	// or the Repository directly.
-	orderHandler := orderhttp.NewOrderService(orderSvc)
+	// Only knows *order.Service (+ *product.Service, used only to look
+	// up each item's real price during Create). Translates HTTP
+	// requests into service calls and writes JSON responses — never
+	// touches the DB or either Repository directly.
+	orderHandler := orderhttp.NewOrderService(orderSvc, productSvc)
 
 	// User Part
 
@@ -128,11 +129,18 @@ func main() {
 	// Wrapped first, so it ends up as the innermost layer: only reached
 	// if Auth (wrapped next) calls next.ServeHTTP.
 	handler = middleware.Logging(handler)
-	// Wrapped last, so it's outermost: runs first on every request. A
-	// request with a missing/invalid token gets rejected with 401 here,
-	// before Logging (or mux) ever sees it — so only requests that pass
-	// Auth get timed/logged. Deliberate trade-off, see the log for why.
+	// Wrapped next, so it's outermost of these two: runs first on every
+	// request. A request with a missing/invalid token gets rejected
+	// with 401 here, before Logging (or mux) ever sees it — so only
+	// requests that pass Auth get timed/logged. Deliberate trade-off,
+	// see the log for why.
 	handler = middleware.Auth(verifier)(handler)
+	// Wrapped last, so it's the true outermost layer of all: runs
+	// before even Auth. Has to — a CORS preflight (OPTIONS) request
+	// never carries a token, so if Auth ran first every preflight
+	// would get a 401 and the browser would never even attempt the
+	// real request.
+	handler = middleware.CORS(handler)
 
 	// Blocks here for as long as the server runs. Only returns once it
 	// stops — either from a real failure (e.g. port already in use) or

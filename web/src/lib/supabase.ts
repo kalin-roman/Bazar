@@ -3,6 +3,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as SecureStore from 'expo-secure-store';
 import * as aesjs from 'aes-js';
 import 'react-native-get-random-values';
+import { Platform } from 'react-native';
 // import { Database } from '../types/database.types';
 
 const supabaseUrl = "https://mjlvcqqshxenvxatfonm.supabase.co";
@@ -67,7 +68,15 @@ class LargeSecureStore {
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
   auth: {
-    storage: new LargeSecureStore(),
+    // expo-secure-store (which LargeSecureStore wraps) has no web
+    // implementation — calling it there throws
+    // "setValueWithKeyAsync is not a function", discovered live
+    // while testing the real-auth reconnection via `npm run web`.
+    // SecureStore's whole reason for existing here (working around
+    // AsyncStorage's 2048-byte value limit on native) doesn't apply
+    // on web, so plain AsyncStorage is a correct fallback there, not
+    // just a workaround.
+    storage: Platform.OS === 'web' ? AsyncStorage : new LargeSecureStore(),
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: false,

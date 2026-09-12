@@ -1,9 +1,13 @@
 package order
 
+import "time"
+
 type Order struct {
-	ID     int64
-	UserID string
-	Items  []OrderItem
+	ID        int64
+	UserID    string
+	Status    string
+	CreatedAt time.Time
+	Items     []OrderItem
 }
 
 type OrderItem struct {

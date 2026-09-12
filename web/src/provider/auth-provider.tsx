@@ -1,4 +1,4 @@
-import AsyncStorage from "@react-native-async-storage/async-storage";
+import type { Session, User } from "@supabase/supabase-js";
 import {
   createContext,
   PropsWithChildren,
@@ -6,37 +6,25 @@ import {
   useEffect,
   useState,
 } from "react";
-
-export type MockUser = {
-  id: string;
-  email: string;
-  name: string;
-};
-
-export type MockSession = {
-  user: MockUser;
-};
+import { supabase } from "../lib/supabase";
 
 type AuthResult = { error: string | null };
 
 type AuthData = {
-  session: MockSession | null;
+  session: Session | null;
   mounting: boolean;
-  user: MockUser | null;
+  user: User | null;
   signIn: (email: string, password: string) => Promise<AuthResult>;
   signUp: (email: string, password: string) => Promise<AuthResult>;
   signOut: () => Promise<void>;
 };
 
-const SESSION_STORAGE_KEY = "bazar-mock-session";
-
-// There is no real backend yet (the Go + PostgreSQL API this will eventually
-// call hasn't been built). Auth here is a local mock: it fabricates a user
-// from whatever email/password the (already zod-validated) form submits, and
-// persists the "session" to AsyncStorage so it survives app reloads. When the
-// real API exists, only the bodies of signIn/signUp/signOut below need to
-// change to real network calls — everything else (useAuth() shape, the auth
-// gate, list-header.tsx) stays the same.
+// Real Supabase auth — was a local mock (fabricated a user from
+// whatever was typed, persisted to AsyncStorage under its own key)
+// while the Go + Postgres backend didn't exist yet. Now that it does,
+// this delegates to the real supabase-js client, which already
+// handles its own session persistence/encryption (see supabase.ts's
+// LargeSecureStore) and token refresh — nothing extra needed here.
 const AuthContext = createContext<AuthData>({
   session: null,
   mounting: false,
@@ -47,45 +35,40 @@ const AuthContext = createContext<AuthData>({
 });
 
 export default function AuthProvider({ children }: PropsWithChildren) {
-  const [session, setSession] = useState<MockSession | null>(null);
+  const [session, setSession] = useState<Session | null>(null);
   const [mounting, setMounting] = useState(true);
 
   useEffect(() => {
-    (async () => {
-      try {
-        const stored = await AsyncStorage.getItem(SESSION_STORAGE_KEY);
-        if (stored) {
-          setSession(JSON.parse(stored) as MockSession);
-        }
-      } finally {
-        setMounting(false);
-      }
-    })();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSession(session);
+      setMounting(false);
+    });
+
+    // Keeps session in sync with sign-in/sign-out/token-refresh events
+    // that happen outside a direct call from this component (e.g. a
+    // refreshed token, or a session restored from storage on cold
+    // start finishing after the initial getSession() call above).
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
+      setSession(session);
+    });
+
+    return () => subscription.unsubscribe();
   }, []);
 
-  const persistSession = async (newSession: MockSession | null) => {
-    setSession(newSession);
-    if (newSession) {
-      await AsyncStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(newSession));
-    } else {
-      await AsyncStorage.removeItem(SESSION_STORAGE_KEY);
-    }
-  };
-
   const signIn = async (email: string, password: string): Promise<AuthResult> => {
-    const user: MockUser = { id: email, email, name: email.split("@")[0] };
-    await persistSession({ user });
-    return { error: null };
+    const { error } = await supabase.auth.signInWithPassword({ email, password });
+    return { error: error?.message ?? null };
   };
 
   const signUp = async (email: string, password: string): Promise<AuthResult> => {
-    const user: MockUser = { id: email, email, name: email.split("@")[0] };
-    await persistSession({ user });
-    return { error: null };
+    const { error } = await supabase.auth.signUp({ email, password });
+    return { error: error?.message ?? null };
   };
 
   const signOut = async () => {
-    await persistSession(null);
+    await supabase.auth.signOut();
   };
 
   return (

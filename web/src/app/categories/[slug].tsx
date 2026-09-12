@@ -1,28 +1,41 @@
-import { FlatList, Text, Image, View, StyleSheet } from "react-native";
+import { ActivityIndicator, FlatList, Text, Image, View, StyleSheet } from "react-native";
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import { CATEGORIES } from "../../../assets/categories";
-import { PRODUCTS } from "../../../assets/products";
+import { useEffect } from "react";
+import { useCatalogStore } from "../../store/catalog-store";
 import ProductListItem from "../../components/product-list-item";
 
 interface CategoryProps {}
 
 const Category = (props: CategoryProps) => {
   const { slug } = useLocalSearchParams<{ slug: string }>();
+  const { categories, products, loading, fetch } = useCatalogStore();
 
-  const category = CATEGORIES.find((category) => category.slug === slug);
+  useEffect(() => {
+    if (categories.length === 0) fetch();
+  }, []);
+
+  if (loading && categories.length === 0) {
+    return (
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
+    );
+  }
+
+  const category = categories.find((category) => category.Slug === slug);
 
   if (!category) return <Redirect href="/404" />;
 
-  const products = PRODUCTS.filter((product) => product.category.slug === slug);
+  const categoryProducts = products.filter((product) => product.CategoryID === category.ID);
 
   return (
     <View style={styles.container}>
-      <Stack.Screen options={{ title: category.name }} />
-      <Image source={{ uri: category.imageUrl }} style={styles.categoryImage} />
-      <Text style={styles.categoryName}>{category.name}</Text>
+      <Stack.Screen options={{ title: category.Name }} />
+      <Image source={{ uri: category.ImageURL }} style={styles.categoryImage} />
+      <Text style={styles.categoryName}>{category.Name}</Text>
       <FlatList
-        data={products}
-        keyExtractor={(item) => item.id.toString()}
+        data={categoryProducts}
+        keyExtractor={(item) => item.ID.toString()}
         renderItem={({ item }) => ( <ProductListItem product={item}/>)}
         numColumns={2}
         columnWrapperStyle={styles.productRow}
@@ -39,6 +52,11 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: "#fff",
     padding: 16,
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   categoryImage: {
     width: "100%",
@@ -57,25 +75,5 @@ const styles = StyleSheet.create({
   },
   productRow: {
     justifyContent: "space-between",
-  },
-  productContainer: {
-    flex: 1,
-    margin: 8,
-  },
-  productImage: {
-    width: "100%",
-    height: 150,
-    resizeMode: "cover",
-    borderRadius: 8,
-  },
-  productTitle: {
-    fontSize: 16,
-    fontWeight: "bold",
-    marginTop: 8,
-  },
-  productPrice: {
-    fontSize: 14,
-    color: "#888",
-    marginTop: 4,
   },
 });

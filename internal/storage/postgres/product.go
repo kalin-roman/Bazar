@@ -60,6 +60,23 @@ func (r *ProductRepository) GetBySlug(ctx context.Context, slug string) (product
 	return p, nil
 }
 
+func (r *ProductRepository) GetByID(ctx context.Context, id int64) (product.Product, error) {
+	row := r.ConnectionPool.QueryRow(ctx,
+		"select id, category_id, title, slug, price_cents, hero_image_url, max_quantity from products where id = $1",
+		id)
+
+	var p product.Product
+	err := row.Scan(&p.ID, &p.CategoryID, &p.Title, &p.Slug, &p.PriceCents, &p.HeroImageURL, &p.MaxQuantity)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return product.Product{}, product.ErrNotFound
+		}
+		return product.Product{}, fmt.Errorf("get product by id: %w", err)
+	}
+
+	return p, nil
+}
+
 func (r *ProductRepository) Create(ctx context.Context, p product.Product) (product.Product, error) {
 	row := r.ConnectionPool.QueryRow(ctx,
 		"insert into products (category_id, title, slug, price_cents, hero_image_url, max_quantity) values ($1, $2, $3, $4, $5, $6) returning id",

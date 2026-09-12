@@ -6,10 +6,12 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/kalin-roman/Bazar/internal/order"
 	"github.com/kalin-roman/Bazar/internal/platform/middleware"
+	"github.com/kalin-roman/Bazar/internal/product"
 )
 
 // fakeRepository is a minimal in-memory order.Repository, just enough
@@ -39,7 +41,39 @@ func (r *fakeRepository) GetByID(ctx context.Context, id int64) (order.Order, er
 }
 
 func (r *fakeRepository) Create(ctx context.Context, o order.Order) (order.Order, error) {
-	return order.Order{}, errors.New("not used by this test")
+	o.ID = int64(len(r.orders) + 1)
+	o.Status = "Pending"
+	r.orders = append(r.orders, o)
+	return o, nil
+}
+
+// fakeProductRepository is a minimal in-memory product.Repository,
+// just enough for Create's server-side price lookup.
+type fakeProductRepository struct {
+	products []product.Product
+}
+
+var _ product.Repository = (*fakeProductRepository)(nil)
+
+func (r *fakeProductRepository) List(ctx context.Context) ([]product.Product, error) {
+	return r.products, nil
+}
+
+func (r *fakeProductRepository) GetBySlug(ctx context.Context, slug string) (product.Product, error) {
+	return product.Product{}, errors.New("not used by this test")
+}
+
+func (r *fakeProductRepository) GetByID(ctx context.Context, id int64) (product.Product, error) {
+	for _, p := range r.products {
+		if p.ID == id {
+			return p, nil
+		}
+	}
+	return product.Product{}, product.ErrNotFound
+}
+
+func (r *fakeProductRepository) Create(ctx context.Context, p product.Product) (product.Product, error) {
+	return product.Product{}, errors.New("not used by this test")
 }
 
 func TestList(t *testing.T) {
@@ -65,7 +99,9 @@ func TestList(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			svc := order.NewService(tc.repo)
-			h := NewOrderService(svc)
+			// List never touches ProductService, so a Service backed by
+			// an empty fake is enough here.
+			h := NewOrderService(svc, product.NewService(&fakeProductRepository{}))
 
 			r := httptest.NewRequest(http.MethodGet, "/orders", nil)
 			w := httptest.NewRecorder()
@@ -92,7 +128,8 @@ func TestGetByID(t *testing.T) {
 		},
 	}}
 	svc := order.NewService(repo)
-	h := NewOrderService(svc)
+	// GetByID never touches ProductService either.
+	h := NewOrderService(svc, product.NewService(&fakeProductRepository{}))
 
 	tests := []struct {
 		name       string
@@ -132,6 +169,82 @@ func TestGetByID(t *testing.T) {
 			}
 			if got.ID != 1 || got.UserID != "alice" {
 				t.Fatalf("got order %+v, want order 1 owned by alice", got)
+			}
+		})
+	}
+}
+
+// TestCreate exercises the checkout endpoint's core guarantee: the
+// price actually charged always comes from the product's real,
+// current price, never from whatever the client's request body says.
+func TestCreate(t *testing.T) {
+	orderRepo := &fakeRepository{}
+	productRepo := &fakeProductRepository{products: []product.Product{
+		{ID: 1, Title: "Chair", PriceCents: 5000},
+	}}
+	h := NewOrderService(order.NewService(orderRepo), product.NewService(productRepo))
+
+	tests := []struct {
+		name       string
+		userID     string
+		body       string
+		wantStatus int
+	}{
+		{
+			name:       "no authenticated user",
+			userID:     "",
+			body:       `{"items":[{"product_id":1,"quantity":1}]}`,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			name:       "malformed body",
+			userID:     "alice",
+			body:       `not json`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "product does not exist",
+			userID:     "alice",
+			body:       `{"items":[{"product_id":999,"quantity":1}]}`,
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:   "client-supplied price is ignored",
+			userID: "alice",
+			// A client trying to check out a $50 chair for $1 — the
+			// request has no price field at all, so there's nothing
+			// for a malicious client to even supply; this just
+			// confirms the happy path succeeds and charges the real
+			// price server-side.
+			body:       `{"items":[{"product_id":1,"quantity":2}]}`,
+			wantStatus: http.StatusCreated,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			r := httptest.NewRequest(http.MethodPost, "/orders", strings.NewReader(tc.body))
+			if tc.userID != "" {
+				r = r.WithContext(middleware.ContextWithUserID(r.Context(), tc.userID))
+			}
+			w := httptest.NewRecorder()
+
+			h.Create(w, r)
+
+			if w.Code != tc.wantStatus {
+				t.Fatalf("got status %d, want %d", w.Code, tc.wantStatus)
+			}
+
+			if tc.wantStatus != http.StatusCreated {
+				return
+			}
+
+			var got order.Order
+			if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+				t.Fatalf("decode response body: %v", err)
+			}
+			if len(got.Items) != 1 || got.Items[0].PriceCents != 5000 {
+				t.Fatalf("got items %+v, want one item priced at 5000 (the product's real price)", got.Items)
 			}
 		})
 	}

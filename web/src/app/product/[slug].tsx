@@ -1,57 +1,76 @@
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import { TouchableOpacity, FlatList, Text, Image, StyleSheet, View } from "react-native";
+import { ActivityIndicator, TouchableOpacity, FlatList, Text, Image, StyleSheet, View } from "react-native";
 import { useEffect, useState } from "react";
 
 import { useToast } from "react-native-toast-notifications";
-import { PRODUCTS } from "../../../assets/products";
+import { useCatalogStore } from "../../store/catalog-store";
 import { useCartStore } from "../../store/cart-store";
 
 const ProductDetails = () => {
     const { slug } = useLocalSearchParams<{ slug: string }>();
-
-    const product = PRODUCTS.find((product) => product.slug === slug);
-
+    const { products, loading, fetch } = useCatalogStore();
+    // Hooks must run unconditionally on every render — the original
+    // version of this screen called useCartStore() only after an
+    // early `if (!product) return ...`, which breaks React's Rules of
+    // Hooks (a real, latent crash risk when navigating between two
+    // products, one found and one not). All hooks now run up front;
+    // only the JSX below is conditional.
+    const { items, addItem, incrementItem, decrementItem } = useCartStore();
     const toast = useToast();
 
-    if(!product) return <Redirect href='/404' />;
+    useEffect(() => {
+        if (products.length === 0) fetch();
+    }, []);
 
-    const { items, addItem, incrementItem, decrementItem } = useCartStore();
+    const product = products.find((product) => product.Slug === slug);
+    const cartItem = product ? items.find((item) => item.id === product.ID) : undefined;
 
-    const cartItem = items.find((item) => item.id === product.id);
-    
-    const initialQuantity = cartItem ? cartItem.quantity : 1;
+    const [quantity, setQuantity] = useState(1);
 
-    const [quantity, setQuantity] = useState(initialQuantity);
+    useEffect(() => {
+        if (cartItem) setQuantity(cartItem.quantity);
+    }, [cartItem?.quantity]);
+
+    if (loading && products.length === 0) {
+        return (
+            <View style={styles.centered}>
+                <ActivityIndicator size="large" />
+            </View>
+        );
+    }
+
+    if (!product) return <Redirect href='/404' />;
 
     const increaseQuantity = () => {
 
-        if (quantity < product.maxQuantity) {
+        if (quantity < product.MaxQuantity) {
             setQuantity(quantity + 1);
-            incrementItem(product.id);
+            incrementItem(product.ID);
         } else {
             toast.show("Cannnot add more items, reached maximum stock limit.", {
               type: "warning",
               placement: "bottom",
               duration: 1500
             });
-      
+
     };
   };
 
     const decreaseQuantity = () => {
         if (quantity > 1) {
             setQuantity(quantity - 1);
-            decrementItem(product.id);
+            decrementItem(product.ID);
         }
     };
 
     const addToCart = () => {
         addItem({
-            id: product.id,
-            title: product.title,
-            image: product.heroImage,
-            price: product.price,
+            id: product.ID,
+            title: product.Title,
+            image: product.HeroImageURL,
+            price: product.PriceCents / 100,
             quantity,
+            maxQuantity: product.MaxQuantity,
         });
         toast.show('Item added to cart!', {
           type: "success",
@@ -60,29 +79,30 @@ const ProductDetails = () => {
         });
     };
 
-    const totalPrice = (product.price * quantity).toFixed(2);
+    const priceEach = product.PriceCents / 100;
+    const totalPrice = (priceEach * quantity).toFixed(2);
 
     return (
         <View style={styles.container}>
-          <Stack.Screen options={{ 
-            title: product.title 
+          <Stack.Screen options={{
+            title: product.Title
             }} />
-          <Image source={product.heroImage} style={styles.heroImage}/>
+          <Image source={{ uri: product.HeroImageURL }} style={styles.heroImage}/>
 
           <View style={{padding:16, flex: 1}}>
-            <Text style={styles.title}>Title: {product.title}</Text>
-            <Text style={styles.slug}>Slug: {product.slug}</Text>
+            <Text style={styles.title}>Title: {product.Title}</Text>
+            <Text style={styles.slug}>Slug: {product.Slug}</Text>
               <View style={styles.priceContainer}>
-                  <Text style={styles.price}>Price: ${product.price.toFixed(2)}</Text>
+                  <Text style={styles.price}>Price: ${priceEach.toFixed(2)}</Text>
                   <Text style={styles.price}>Total: ${totalPrice}</Text>
               </View>
 
-            <FlatList 
-              data={product.imagesUrl}
+            <FlatList
+              data={product.ImagesURL ?? []}
               keyExtractor={(item, index) => index.toString()}
               renderItem={({ item }) => (
 
-                <Image source={item} style={styles.image} />
+                <Image source={{ uri: item }} style={styles.image} />
               )}
               horizontal
               showsHorizontalScrollIndicator={false}
@@ -102,13 +122,13 @@ const ProductDetails = () => {
                 <TouchableOpacity
                 style={styles.quantityButton}
                 onPress={increaseQuantity}
-                disabled={quantity >= product.maxQuantity}
+                disabled={quantity >= product.MaxQuantity}
                 >
                 <Text style={styles.quantityButtonText}>+</Text>
                 </TouchableOpacity>
 
                 <TouchableOpacity
-                style={[styles.addToCartButton, 
+                style={[styles.addToCartButton,
                   {opacity: quantity === 0 ? 0.5 : 1},
                 ]}
                 onPress={addToCart}
@@ -127,6 +147,11 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#fff',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   heroImage: {
     width: '100%',

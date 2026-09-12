@@ -7,20 +7,11 @@ import {
   TouchableOpacity,
   FlatList,
 } from "react-native";
-import { useCartStore } from "../store/cart-store";
+import { useState } from "react";
+import { useCartStore, CartItemType } from "../store/cart-store";
 import { useOrdersStore } from "../store/orders-store";
-import { PRODUCTS } from "../../assets/products";
-import { Order } from "../../assets/types/order";
 import { StatusBar } from "expo-status-bar";
 import { useRouter } from "expo-router";
-
-type CartItemType = {
-  id: number;
-  title: string;
-  price: number;
-  quantity: number;
-  image: any;
-};
 
 type CartItemProps = {
   item: CartItemType;
@@ -37,7 +28,7 @@ const CartItem = ({
 }: CartItemProps) => {
   return (
     <View style={styles.cartItem}>
-      <Image source={item.image} style={styles.itemImage} />
+      <Image source={{ uri: item.image }} style={styles.itemImage} />
       <View style={styles.itemDetails}>
         <Text style={styles.itemTitle}>{item.title}</Text>
         <Text style={styles.itemPrice}>${item.price.toFixed(2)}</Text>
@@ -71,35 +62,36 @@ const CartItem = ({
 export default function Cart() {
   const { items, removeItem, decrementItem, incrementItem, getTotalPrice, clearCart } =
     useCartStore();
-  const { addOrder } = useOrdersStore();
+  const { checkout } = useOrdersStore();
   const router = useRouter();
+  const [submitting, setSubmitting] = useState(false);
+  const [checkoutError, setCheckoutError] = useState<string | null>(null);
 
-  const handleCheckout = () => {
-    if (items.length === 0) return;
+  const handleCheckout = async () => {
+    if (items.length === 0 || submitting) return;
 
-    const orderItems = items
-      .map((cartItem) => {
-        const product = PRODUCTS.find((p) => p.id === cartItem.id);
-        if (!product) return null;
-        return { product, quantity: cartItem.quantity };
-      })
-      .filter((item): item is { product: (typeof PRODUCTS)[number]; quantity: number } => item !== null);
-
-    const totalPrice = getTotalPrice();
-    const id = Date.now().toString();
-    const newOrder: Order = {
-      id,
-      slug: `order-${id}`,
-      item: `Order #${id}`,
-      details: `${items.length} item(s) — $${totalPrice}`,
-      status: "Pending",
-      date: new Date().toISOString().split("T")[0],
-      items: orderItems,
-    };
-
-    addOrder(newOrder);
-    clearCart();
-    router.replace({ pathname: "/order-confirmation", params: { slug: newOrder.slug } });
+    setSubmitting(true);
+    setCheckoutError(null);
+    try {
+      // The server looks up each product's real, current price itself
+      // — only product_id/quantity are sent, matching what POST
+      // /orders actually accepts (see internal/http/orderhttp's
+      // Create handler).
+      const created = await checkout(
+        items.map((item) => ({ product_id: item.id, quantity: item.quantity }))
+      );
+      clearCart();
+      router.replace({
+        pathname: "/order-confirmation",
+        params: { slug: created.ID.toString() },
+      });
+    } catch (err) {
+      setCheckoutError(
+        err instanceof Error ? err.message : "Checkout failed, please try again."
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -122,11 +114,15 @@ export default function Cart() {
 
       <View style={styles.footer}>
         <Text style={styles.totalText}>Total: ${getTotalPrice()}</Text>
+        {checkoutError && <Text style={styles.checkoutErrorText}>{checkoutError}</Text>}
         <TouchableOpacity
           onPress={handleCheckout}
-          style={styles.checkoutButton}
+          style={[styles.checkoutButton, submitting && styles.checkoutButtonDisabled]}
+          disabled={submitting}
         >
-          <Text style={styles.checkoutButtonText}>Checkout</Text>
+          <Text style={styles.checkoutButtonText}>
+            {submitting ? "Placing order…" : "Checkout"}
+          </Text>
         </TouchableOpacity>
       </View>
     </View>
@@ -199,6 +195,14 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     paddingHorizontal: 32,
     borderRadius: 8,
+  },
+  checkoutButtonDisabled: {
+    opacity: 0.6,
+  },
+  checkoutErrorText: {
+    color: "#c00",
+    marginBottom: 12,
+    textAlign: "center",
   },
   checkoutButtonText: {
     color: "#fff",

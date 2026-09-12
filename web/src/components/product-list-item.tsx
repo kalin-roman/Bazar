@@ -1,24 +1,24 @@
 import { Image, Text, View, StyleSheet, Pressable } from "react-native";
-import { Product } from "../../assets/types/product";
+import { ApiProduct } from "../lib/api";
 import { Link } from "expo-router";
 
 interface ProductListItemProps {
-  product: Product;
+  product: ApiProduct;
 }
 
 const ProductListItem = ({ product }: ProductListItemProps) => {
   return (
-    <Link asChild href={`/product/${product.slug}`}>
+    <Link asChild href={`/product/${product.Slug}`}>
     <Pressable style={styles.item}>
       <View style={styles.itemImageContainer}>
-        <Image source={product.heroImage} style={styles.itemImage} />
+        <Image source={{ uri: product.HeroImageURL }} style={styles.itemImage} />
       </View>
       <View style={styles.itemTextContainer}>
-        <Text style={styles.itemTitle}>{product.title}</Text>
-        <Text style={styles.itemPrice}>${product.price.toFixed(2)}</Text>
+        <Text style={styles.itemTitle}>{product.Title}</Text>
+        <Text style={styles.itemPrice}>${(product.PriceCents / 100).toFixed(2)}</Text>
       </View>
     </Pressable>
-    </Link> 
+    </Link>
   );
 };
 

@@ -11,6 +11,7 @@ var ErrNotFound = errors.New("product: not found")
 type Repository interface {
 	List(ctx context.Context) ([]Product, error)
 	GetBySlug(ctx context.Context, slug string) (Product, error)
+	GetByID(ctx context.Context, id int64) (Product, error)
 	Create(ctx context.Context, p Product) (Product, error)
 }
 
@@ -28,6 +29,10 @@ func (s *Service) List(ctx context.Context) ([]Product, error) {
 
 func (s *Service) GetBySlug(ctx context.Context, slug string) (Product, error) {
 	return s.Repository.GetBySlug(ctx, slug)
+}
+
+func (s *Service) GetByID(ctx context.Context, id int64) (Product, error) {
+	return s.Repository.GetByID(ctx, id)
 }
 
 func (s *Service) Create(ctx context.Context, p Product) (Product, error) {

@@ -1,13 +1,18 @@
 import { Redirect, Stack, useLocalSearchParams, useRouter } from "expo-router";
 import { FlatList, Image, StyleSheet, Text, TouchableOpacity, View } from "react-native";
 import { useOrdersStore } from "../store/orders-store";
+import { useCatalogStore } from "../store/catalog-store";
 
 const OrderConfirmation = () => {
-  const { slug } = useLocalSearchParams();
+  // Route param is named "slug" (unchanged file/route name), but its
+  // value is the order's real numeric ID — backend orders have no
+  // slug field.
+  const { slug } = useLocalSearchParams<{ slug: string }>();
   const router = useRouter();
   const { orders } = useOrdersStore();
+  const { products } = useCatalogStore();
 
-  const order = orders.find((order) => order.slug === slug);
+  const order = orders.find((order) => order.ID.toString() === slug);
 
   if (!order) {
     return <Redirect href={"/404"} />;
@@ -17,25 +22,33 @@ const OrderConfirmation = () => {
     <View style={styles.container}>
       <Stack.Screen options={{ title: "Order Confirmed" }} />
       <Text style={styles.title}>Thank you for your order!</Text>
-      <Text style={styles.subtitle}>{order.item}</Text>
-      <Text style={styles.details}>{order.details}</Text>
-      <Text style={styles.date}>Placed on {order.date}</Text>
+      <Text style={styles.subtitle}>Order #{order.ID}</Text>
+      <Text style={styles.details}>
+        {order.Items.length} item(s) — $
+        {(order.Items.reduce((sum, i) => sum + i.PriceCents * i.Quantity, 0) / 100).toFixed(2)}
+      </Text>
+      <Text style={styles.date}>Placed on {new Date(order.CreatedAt).toLocaleDateString()}</Text>
 
       <Text style={styles.itemsTitle}>Items</Text>
       <FlatList
-        data={order.items}
-        keyExtractor={(item) => item.product.id.toString()}
-        renderItem={({ item }) => (
-          <View style={styles.orderItem}>
-            <Image source={item.product.heroImage} style={styles.heroImage} />
-            <View style={styles.itemInfo}>
-              <Text style={styles.itemName}>{item.product.title}</Text>
-              <Text style={styles.itemPrice}>
-                ${item.product.price.toFixed(2)} x {item.quantity}
-              </Text>
+        data={order.Items}
+        keyExtractor={(item) => item.ProductID.toString()}
+        renderItem={({ item }) => {
+          const product = products.find((p) => p.ID === item.ProductID);
+          return (
+            <View style={styles.orderItem}>
+              {product && (
+                <Image source={{ uri: product.HeroImageURL }} style={styles.heroImage} />
+              )}
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{product?.Title ?? `Product #${item.ProductID}`}</Text>
+                <Text style={styles.itemPrice}>
+                  ${(item.PriceCents / 100).toFixed(2)} x {item.Quantity}
+                </Text>
+              </View>
             </View>
-          </View>
-        )}
+          );
+        }}
       />
 
       <View style={styles.footer}>

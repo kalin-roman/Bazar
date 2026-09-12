@@ -1,46 +1,83 @@
 import { Redirect, Stack, useLocalSearchParams } from "expo-router";
-import {FlatList, StyleSheet, Text, View, Image} from "react-native";
+import { FlatList, StyleSheet, Text, View, Image, ActivityIndicator } from "react-native";
+import { useEffect } from "react";
 import { useOrdersStore } from "../../../store/orders-store";
+import { useCatalogStore } from "../../../store/catalog-store";
+
+const statusColors: Record<string, string> = {
+  Pending: "orange",
+  Completed: "green",
+  Shipped: "blue",
+  InTransit: "purple",
+};
 
 const OrderDetails = () => {
+  // Route param is named "slug" (unchanged file/route name), but its
+  // value is the order's real numeric ID.
+  const { slug } = useLocalSearchParams<{ slug: string }>();
 
-    const {slug} = useLocalSearchParams();
+  const { orders, loading, fetch } = useOrdersStore();
+  const { products, fetch: fetchCatalog } = useCatalogStore();
 
-    const { orders } = useOrdersStore();
-    const order = orders.find(order=> order.slug === slug);
-    
-    if (!order) {
-        return (
-           <Redirect href={"/404"}/>
-        );
-    }
+  useEffect(() => {
+    if (orders.length === 0) fetch();
+    if (products.length === 0) fetchCatalog();
+  }, []);
+
+  if (loading && orders.length === 0) {
     return (
-        <View style={styles.container}>
-            <Stack.Screen options={{ title: `${order.item}` }} />
-            <Text style={styles.item}>{order.item}</Text>
-            <Text style={styles.details}>{order.details}</Text>
-            <View style={[styles.statusBadge, styles[`statusBadge_${order.status}`]]}>
-                <Text style={styles.statusText}>{order.status}</Text>
-            </View>
-            <Text style={styles.date}>Order Date: {order.date}</Text>
-            <Text style={styles.itemsTitle}>Items Order:</Text>
-            <FlatList
-                data={order.items}
-                keyExtractor={(item) => item.product.id.toString()}
-                renderItem={({ item }) => (
-                    <View style={styles.orderItem}>
-                        <Image source={item.product.heroImage} style={styles.heroImage} />
-                        <View style={styles.itemInfo}>
-                            <Text style={styles.itemName}>{item.product.title}</Text>
-                            <Text style={styles.itemPrice}>${item.product.price.toFixed(2)} x {item.quantity}</Text>
-                            <Text style={styles.itemSubtotal}>${(item.product.price * item.quantity).toFixed(2)}</Text>
-                        </View>
-                    </View>
-                )}
-            />
-        </View>
+      <View style={styles.centered}>
+        <ActivityIndicator size="large" />
+      </View>
     );
-}
+  }
+
+  const order = orders.find((order) => order.ID.toString() === slug);
+
+  if (!order) {
+    return <Redirect href={"/404"} />;
+  }
+
+  const totalCents = order.Items.reduce((sum, i) => sum + i.PriceCents * i.Quantity, 0);
+
+  return (
+    <View style={styles.container}>
+      <Stack.Screen options={{ title: `Order #${order.ID}` }} />
+      <Text style={styles.item}>Order #{order.ID}</Text>
+      <Text style={styles.details}>
+        {order.Items.length} item(s) — ${(totalCents / 100).toFixed(2)}
+      </Text>
+      <View style={[styles.statusBadge, { backgroundColor: statusColors[order.Status] ?? "#999" }]}>
+        <Text style={styles.statusText}>{order.Status}</Text>
+      </View>
+      <Text style={styles.date}>Order Date: {new Date(order.CreatedAt).toLocaleDateString()}</Text>
+      <Text style={styles.itemsTitle}>Items Order:</Text>
+      <FlatList
+        data={order.Items}
+        keyExtractor={(item) => item.ProductID.toString()}
+        renderItem={({ item }) => {
+          const product = products.find((p) => p.ID === item.ProductID);
+          return (
+            <View style={styles.orderItem}>
+              {product && (
+                <Image source={{ uri: product.HeroImageURL }} style={styles.heroImage} />
+              )}
+              <View style={styles.itemInfo}>
+                <Text style={styles.itemName}>{product?.Title ?? `Product #${item.ProductID}`}</Text>
+                <Text style={styles.itemPrice}>
+                  ${(item.PriceCents / 100).toFixed(2)} x {item.Quantity}
+                </Text>
+                <Text style={styles.itemSubtotal}>
+                  ${((item.PriceCents * item.Quantity) / 100).toFixed(2)}
+                </Text>
+              </View>
+            </View>
+          );
+        }}
+      />
+    </View>
+  );
+};
 export default OrderDetails;
 
 const styles: { [key: string]: any } = StyleSheet.create({
@@ -48,6 +85,11 @@ const styles: { [key: string]: any } = StyleSheet.create({
     flex: 1,
     padding: 16,
     backgroundColor: '#fff',
+  },
+  centered: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   item: {
     fontSize: 24,
@@ -62,18 +104,6 @@ const styles: { [key: string]: any } = StyleSheet.create({
     padding: 8,
     borderRadius: 4,
     alignSelf: 'flex-start',
-  },
-  statusBadge_Pending: {
-    backgroundColor: 'orange',
-  },
-  statusBadge_Completed: {
-    backgroundColor: 'green',
-  },
-  statusBadge_Shipped: {
-    backgroundColor: 'blue',
-  },
-  statusBadge_InTransit: {
-    backgroundColor: 'purple',
   },
   statusText: {
     color: '#fff',
