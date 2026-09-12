@@ -2,6 +2,12 @@
 
 [![Go](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml)
 
+**Live**: [bazar-xxjl.onrender.com](https://bazar-xxjl.onrender.com) —
+a real, deployed API (Render + Supabase Postgres, Supabase-issued JWT
+auth). Every route requires a valid token, so a bare visit to the URL
+correctly returns `401`, not a page — see below for what's actually
+running behind it.
+
 A full-stack mobile marketplace project: a React Native / Expo frontend
 paired with a Go backend built from scratch, by hand, as a structured
 learning project in backend engineering and Go.
@@ -41,12 +47,18 @@ project actually demonstrates and its current state.
   clean handler → service → repository layering — handlers never touch
   the database directly. Implemented for all four domains.
 - **JWT verification with an actual security rationale, not just
-  library plumbing**: `internal/auth` verifies Supabase-issued HS256
-  JWTs and explicitly guards against the algorithm-confusion attack
-  class (rejecting a forged token that claims a different/no signing
-  algorithm) rather than trusting the token's own header — verified
-  with tests covering a valid token, an expired token, a wrong-secret
-  token, and a forged `alg:none` token.
+  library plumbing**: `internal/auth` verifies Supabase-issued ES256
+  JWTs against keys fetched from Supabase's live JWKS endpoint (public-key,
+  asymmetric verification — no shared secret), explicitly guarding
+  against the algorithm-confusion attack class (rejecting a forged
+  token that claims a different/no signing algorithm) rather than
+  trusting the token's own header. Originally built and tested against
+  HS256 on the (incorrect) assumption Supabase used shared-secret
+  signing; when the real deployed token turned out to be ES256, the
+  mismatch was diagnosed from first principles (decoding the token's
+  header by hand, checking it against the JWKS endpoint) and the
+  verifier was rewritten for real asymmetric verification — a genuine
+  debugging story, not just a feature list item.
 - **Hand-rolled middleware, composed deliberately**: the
   `net/http.Handler` wrap-and-delegate pattern (no framework middleware
   system) — a request-logging middleware and a closure-based
@@ -76,6 +88,18 @@ project actually demonstrates and its current state.
 - **CI**: a GitHub Actions workflow runs `go build`, `go vet`, a
   `gofmt` check, and `go test` on every push/PR — verified green
   against a real run, not just written and assumed.
+- **Actually deployed, not just running on localhost**: live on
+  Render, backed by a real Supabase Postgres database, real
+  Supabase-issued auth tokens verified against Supabase's live JWKS
+  endpoint. Getting there surfaced and required fixing several real,
+  disparate infrastructure problems in sequence — a hosting platform
+  requiring payment info, a build system defaulting to the wrong
+  runtime, an IPv4/IPv6 connection-pooling mismatch, the ES256 auth
+  rewrite above, and a pre-existing, differently-shaped `users` table
+  in the target database that had been silently halting every schema
+  migration after it. Each was diagnosed from the actual error/log
+  output, not guessed — see `docs/GO_LEARNING_LOG.md` for the full
+  sequence.
 - **A modern React Native app**: Expo Router v6 file-based routing,
   TypeScript throughout, Zustand for client state, Supabase for auth
   and persistence (frontend side).
@@ -95,7 +119,7 @@ Bazar/
 │   ├── category/                # Category domain type + Repository/Service + tests
 │   ├── order/                    # Order domain type + Repository/Service + tests
 │   ├── user/                      # User domain type + Repository/Service + tests
-│   ├── auth/                       # Supabase JWT verification (HS256)
+│   ├── auth/                       # Supabase JWT verification (ES256/JWKS)
 │   ├── storage/postgres/            # Real pgx-backed Repository implementations, one file per domain
 │   └── http/
 │       ├── categoryhttp/               # Handler + router for /categories
@@ -138,10 +162,13 @@ Each backend domain package follows the same shape:
   suites, real `pgx` `Repository` implementations validated against
   live Postgres, and HTTP handlers + routers.
 - All SQL migrations (`categories`; `products` + `product_images`;
-  `users`; `orders` + `order_items`), applied and rolled back cleanly
-  against a real Postgres instance in both directions.
-- JWT verification (`internal/auth`), including the algorithm-confusion
-  defense, covered by tests.
+  `app_users`; `orders` + `order_items`), applied and rolled back
+  cleanly against a real Postgres instance in both directions.
+- JWT verification (`internal/auth`) against Supabase's real ES256/
+  JWKS tokens, including the algorithm-confusion defense — verified
+  live against Supabase's real JWKS endpoint and a real signed token
+  (no committed unit tests for this package; correctness proven
+  against the real external system instead throughout this project).
 - Both hand-rolled middlewares (request logging, JWT auth-checking),
   composed together in a deliberate order.
 - Env-var-based config loading (`internal/config`).
@@ -158,6 +185,11 @@ Each backend domain package follows the same shape:
   for both domains.
 - CI (GitHub Actions: build/vet/gofmt/test on every push/PR), green
   and running.
+- **Deployed and live**: [bazar-xxjl.onrender.com](https://bazar-xxjl.onrender.com),
+  on Render, backed by a real Supabase Postgres database. All four
+  domains verified end-to-end against the live URL with a real,
+  freshly-signed-in Supabase user's token — `200` on every route,
+  `401` with no token.
 
 **In progress:**
 - `internal/platform/{logger,database,middleware}` — optional
@@ -166,13 +198,18 @@ Each backend domain package follows the same shape:
 - Authorization covers `order`/`user`; `category`/`product` have no
   owner concept to check (not user-scoped resources), so there's
   nothing analogous needed there.
+- No committed test coverage for HTTP handlers or `internal/auth` —
+  both verified live/via throwaway harnesses throughout instead of
+  permanent `_test.go` files.
 
 **Not started:**
-- Reconnecting the frontend to a live backend instead of mock data.
-- Actually deploying the backend somewhere reachable.
+- Reconnecting the frontend to the now-live backend instead of mock
+  data.
 
-In short: the backend's core roadmap is complete and live-proven —
-domain logic, persistence, HTTP, auth verification, the middleware
-chain, real authorization checks on every user-owned resource, and CI
-are all in place. What's left is optional polish, deployment, and the
-separate, larger effort of reconnecting the frontend.
+In short: the backend's core roadmap is complete, live-proven, and
+now actually deployed — domain logic, persistence, HTTP, real
+Supabase auth verification, the middleware chain, authorization
+checks on every user-owned resource, CI, and a real running
+production URL are all in place. What's left is optional polish, a
+bit more test coverage, and the separate, larger effort of
+reconnecting the frontend.

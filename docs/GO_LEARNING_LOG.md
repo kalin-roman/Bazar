@@ -1538,6 +1538,186 @@ Verification: `go build`/`go vet`/`gofmt -l .`/`go test ./...` all
 clean across the whole module after every Go-side change, mirroring
 CI's own checks exactly.
 
+### ✅ Deployment — live, working, on Render
+
+Picked back up after the `Product` rename. Real infra work, driven by
+the user through Render's dashboard with Claude guiding — a genuine
+sequence of distinct bugs, each one real and worth recording, since
+this is the first time anything in this project has run outside a
+local machine.
+
+**1. Render defaulted to its native Go buildpack, not Docker.** First
+deploy attempt failed with `no Go files in
+/opt/render/project/go/src/github.com/kalin-roman/Bazar` — Render had
+auto-detected "Go" as the runtime (seeing `go.mod`) instead of using
+the `Dockerfile`, and its default build command targets the repo
+root, which has no `.go` files directly in it (the real `main`
+package lives in `cmd/server/`). Fixed by explicitly setting the
+service's Runtime to Docker.
+
+**2. `DATABASE_URL` was Supabase's project/API URL, not a Postgres
+connection string.** `https://<ref>.supabase.co` isn't something
+`pgxpool.New` can parse (`cannot parse ...: failed to parse as
+keyword/value`) — needed the real `postgresql://user:pass@host:port/db`
+connection string from Supabase's "Connect" dialog instead.
+
+**3. Direct connection requires a paid IPv4 add-on.** Supabase's free
+tier serves the direct connection over IPv6 only; Render's free tier
+is IPv4-only. Fixed by using the **session-mode pooler** connection
+instead (IPv4-reachable on every plan) — found under a differently-
+labeled tab in Supabase's current dashboard than what their own docs
+page showed (checked live to get accurate navigation rather than
+trust stale memory).
+
+**4. The real one: Supabase issues ES256 tokens, not the HS256 this
+project was built and confirmed against.** First real end-to-end
+curl against the live deployment returned `401` even with a freshly
+signed-in user's real token. Diagnosed properly, not guessed:
+decoded the token's header directly (`base64 -d`) →
+`{"alg":"ES256",...}` — confirmed by feeding the real token straight
+into the existing `auth.VerifyToken` and getting back `unexpected
+signing method ES256`, the exact algorithm-confusion guard built
+back in the original auth lesson correctly refusing to trust an
+unexpected algorithm, just now correctly rejecting a *legitimate*
+token because the whole implementation's assumption (shared-secret
+HS256) no longer matched reality.
+
+This was a real, new lesson — asymmetric JWT verification, never
+covered before, not just a config tweak. Rewrote
+`internal/auth/auth.go` from scratch:
+- `NewVerifier(jwksURL)` fetches Supabase's JWKS
+  (`/auth/v1/.well-known/jwks.json`) once, at startup — same
+  fail-fast-if-broken reasoning as `db.New`/`config.Load`, since
+  nothing can verify a single request without it succeeding.
+- Each EC key's `x`/`y` (base64url-encoded curve coordinates) decoded
+  by hand into a real `*ecdsa.PublicKey` — deliberately hand-rolled
+  (this is just data conversion, consistent with the project's
+  "no framework/library where stdlib + a little code covers it"
+  stance) rather than reaching for a JWKS client library. The actual
+  signature math still stays inside `golang-jwt`, same boundary as
+  the original HS256 version.
+- `VerifyToken`'s `keyFunc` now checks `*jwt.SigningMethodECDSA`
+  instead of `*jwt.SigningMethodHMAC` — same algorithm-confusion
+  defense, correctly re-aimed at the actual algorithm family in use,
+  plus matching the token's `kid` header against the fetched key set
+  (multiple keys supported, for whenever Supabase rotates its
+  signing key).
+- `middleware.Auth` and `config.Config` updated to match:
+  `JWT_SECRET` → `JWKS_URL`, `Auth(secret string)` →
+  `Auth(verifier *auth.Verifier)`.
+
+Verified three ways, not just compiled: (1) a throwaway harness
+calling the new `Verifier` directly against the real, live Supabase
+JWKS endpoint with a real signed-in user's token — correct user ID
+extracted; a garbage string and a signature-tampered copy of the same
+token both correctly rejected, the tampered one specifically with
+`crypto/ecdsa: verification error`, proving the signature check does
+something, not just parses; (2) the real local server, pointed at the
+real Supabase JWKS URL (but local Postgres for data) — `401`/`200`
+exactly as expected; (3) full existing test suite (`category`,
+`order`, `product`, `user`) still green, no regression from the
+rewrite. `internal/auth` still has no permanent `_test.go` (same as
+its original HS256 version) — correctness proven against the real
+external system instead, arguably a stronger check than a test built
+against a fabricated key would have been.
+
+Incidental, real fix along the way: while chasing this, a Supabase
+database password had briefly been pasted as a plain-text comment
+into a tracked source file (`db/db.go`) during live debugging.
+Caught immediately (never committed, never pushed — confirmed via
+`git log`/`git show origin/main`, so no history rewrite was needed),
+removed on the spot. Flagged as a real precedent for why
+`config.Load()` reads secrets from environment variables instead of
+source — this was a one-off slip while debugging live under time
+pressure, not a design gap.
+
+**5. The last one: this Supabase project already has its own `users`
+table.** Even after fixing ES256, `/products`/`/orders`/`/users` all
+500'd — traced back through a chain that started weeks earlier at
+this log's very first Supabase migration attempt (`relation "users"
+already exists`), which had been provisionally worked around at the
+time without ever being root-caused. Root cause, finally confirmed by
+looking at the actual existing table in Supabase's Table Editor: `id
+uuid` (primary key, **foreign key** — to `auth.users`, Supabase's own
+authentication table), `email`, `type`, `avatar_url`, `created_at` —
+a real, pre-existing table from the original pre-disconnection
+frontend integration mentioned in `Bazar/CLAUDE.md`, entirely
+unrelated to and incompatible with this project's own `users` shape.
+
+Because `000003_create_users` collided and failed, **every migration
+after it silently never ran** on Supabase (`000004`–`000007`) —
+explaining in one shot why `categories` (created by `000001`, before
+the failure) worked while everything downstream 500'd with "relation
+does not exist" or, for `users` specifically, "column full_name does
+not exist" (querying Supabase's real, differently-shaped table).
+
+Real design decision, not a bug fix — asked directly rather than
+picked unilaterally: rename this backend's own table to `app_users`
+(kept `internal/user`'s existing shape entirely as-is; simplest,
+least destructive), versus adopting Supabase's existing table's shape
+as the real one (bigger rework, arguably more "correct" long-term
+integration with Supabase's own auth pattern, not chosen this time).
+Chose the rename.
+
+Treated as fixing a migration that had never actually taken effect
+anywhere real, not as editing an already-applied one (the project's
+normal, firm rule): it never succeeded on Supabase in the first
+place, and locally is a disposable Docker container that's been
+reset for testing several times already in this log. Edited (not
+layered a new migration on top of) `000003` (renamed
+`000003_create_users` → `000003_create_app_users`, table `users` →
+`app_users`), `000004` (its `references users(id)` FK →
+`references app_users(id)`), `000005`'s `down.sql` (same FK,
+restored on rollback), and `000006` (renamed →
+`000006_alter_app_users_id`, `alter table users` →
+`alter table app_users`, sequence name updated to match) — plus
+`internal/storage/postgres/user.go`'s three SQL statements. Local
+Postgres fully wiped and the corrected chain re-applied from zero
+(rather than trying to reconcile a half-applied rollback against
+stale down-migration content) — full round-trip re-validated: `up`
+(all 7, clean) → `down -all` (back to empty) → `up` again (clean).
+
+Then the same three-command fix applied to the real Supabase
+database, run by the user in their own terminal (never through
+Claude — no access to real production credentials): check the dirty
+version (`migrate ... version`), `force` the bookkeeping back to `2`
+(the last migration that genuinely succeeded there, correcting
+tracking without touching any table), `up` again — this time
+succeeding all the way through `000007` since `app_users` no longer
+collides with anything.
+
+Separate, smaller fix bundled in along the way, worth keeping
+regardless of this bug: every HTTP handler was silently discarding
+the real error before returning a bare `500` — meant Render's own
+logs showed nothing diagnostic when something failed server-side.
+Added `log.Println` of the actual error in all four domains'
+`List`/`GetByID` handlers before writing the status code. This is
+exactly what surfaced the real errors that cracked this whole chain
+open (`relation "products" does not exist`, `column "full_name" does
+not exist`) — without it, this would have stayed a guessing game.
+
+**Final live proof, the real thing this whole deployment section was
+building toward**: `https://bazar-xxjl.onrender.com` — all four
+domains (`/categories`, `/products`, `/orders`, `/users`) return
+`200` with a real, freshly-signed-in Supabase user's token; the same
+request with no token correctly returns `401`. Real deployed server,
+real Supabase Postgres, real Supabase-issued ES256 JWT verified
+against the real JWKS endpoint. Not a local smoke test — the actual
+live URL.
+
+**Honest recap of the full deployment chain**, since it was a
+genuinely instructive sequence of distinct, real problems, each
+requiring actual diagnosis rather than guesswork: Fly.io requiring a
+card → switched to Render → Render defaulting to the wrong
+buildpack → wrong `DATABASE_URL` format → IPv4/IPv6 pooling mismatch
+→ ES256 vs. the HS256 the backend was built for → a pre-existing,
+differently-shaped `users` table silently halting every migration
+after it. This is a stronger, more honest portfolio story than a
+deployment that "just worked" would have been — six real, disparate
+issues, each correctly diagnosed from first principles (decoding a
+JWT by hand, reading `\d` output, tracing a migration's silent
+halt-and-skip) rather than trial-and-error.
+
 ### Deferred/optional polish, not blocking, revisit if relevant later
 
 - `Order.Total()` method (sum `Price * Quantity` across `Items`).
@@ -1545,7 +1725,17 @@ CI's own checks exactly.
   and the rest of the codebase's naming convention.
 - `internal/platform/{logger,database,middleware}` — optional
   organizational polish, not functionally required.
-- Reconnecting the frontend to this now-real backend instead of static
-  mock data — separate, larger, not learning-gated.
-- The Supabase-pooler/`pgx` prepared-statement gotcha noted above,
-  once deployment is actually running against Supabase.
+- Reconnecting the frontend to this now-real, now-deployed backend
+  instead of static mock data — separate, larger, not learning-gated.
+- Given the pooler connection actually in use is **session mode**,
+  not transaction mode, the earlier-flagged prepared-statement
+  limitation doesn't apply here — session mode supports prepared
+  statements normally, so no `pgx` config change was needed after
+  all. Noted for the record, not left as an open question.
+- No committed test coverage for HTTP handlers or `internal/auth` —
+  both have been verified live/via throwaway harnesses throughout
+  this project rather than permanent `_test.go` files. Real,
+  deliberate practice so far, but worth adding at least a few
+  handler-level tests before presenting this project for review, so
+  a reader skimming the repo (rather than this log) can see that
+  discipline too.
