@@ -7,7 +7,7 @@ type Order struct {
 }
 
 type OrderItem struct {
-	ProductID int64
-	Price     int64
-	Quantity  int64
+	ProductID  int64
+	PriceCents int64
+	Quantity   int64
 }

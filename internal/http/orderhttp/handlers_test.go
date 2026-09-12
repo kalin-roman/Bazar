@@ -88,7 +88,7 @@ func TestGetByID(t *testing.T) {
 		{
 			ID:     1,
 			UserID: "alice",
-			Items:  []order.OrderItem{{ProductID: 1, Price: 1000, Quantity: 2}},
+			Items:  []order.OrderItem{{ProductID: 1, PriceCents: 1000, Quantity: 2}},
 		},
 	}}
 	svc := order.NewService(repo)

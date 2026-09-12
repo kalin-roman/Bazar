@@ -35,7 +35,7 @@ func (s *Service) Create(ctx context.Context, o Order) (Order, error) {
 		return Order{}, ErrInvalid
 	}
 	for _, item := range o.Items {
-		if item.ProductID == 0 || item.Quantity <= 0 || item.Price < 0 {
+		if item.ProductID == 0 || item.Quantity <= 0 || item.PriceCents < 0 {
 			return Order{}, ErrInvalid
 		}
 	}
