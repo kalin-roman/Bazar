@@ -61,13 +61,16 @@ project actually demonstrates and its current state.
   debugging story, not just a feature list item.
 - **Hand-rolled middleware, composed deliberately**: the
   `net/http.Handler` wrap-and-delegate pattern (no framework middleware
-  system) — a request-logging middleware and a closure-based
-  auth-checking middleware (carries a secret, propagates the verified
-  user ID via `context.WithValue` using an unexported key type to avoid
-  collisions), wired together in a specific, understood order: auth
-  runs outermost, so a request with a missing/invalid token is rejected
-  before the logging middleware ever sees it — verified live via the
-  running server's own log output, not just by reading the code.
+  system) — request logging, a closure-based auth-checking middleware
+  (holds the JWKS verifier, propagates the verified user ID via
+  `context.WithValue` using an unexported key type to avoid
+  collisions), and CORS, wired in a specific, understood order rather
+  than an arbitrary one: CORS outermost (a preflight request never
+  carries a token, so it has to run before Auth even gets a chance to
+  reject it), Auth next (a request with a missing/invalid token is
+  rejected before Logging ever sees it), Logging innermost — verified
+  live via the running server's own log output, not just by reading
+  the code.
 - **A fully wired, live-tested server**: `cmd/server/main.go` composes
   every layer above — config, DB pool, all four domains'
   repository/service/handler stacks, one shared `http.ServeMux`, and
@@ -95,14 +98,36 @@ project actually demonstrates and its current state.
   disparate infrastructure problems in sequence — a hosting platform
   requiring payment info, a build system defaulting to the wrong
   runtime, an IPv4/IPv6 connection-pooling mismatch, the ES256 auth
-  rewrite above, and a pre-existing, differently-shaped `users` table
-  in the target database that had been silently halting every schema
-  migration after it. Each was diagnosed from the actual error/log
-  output, not guessed — see `docs/GO_LEARNING_LOG.md` for the full
-  sequence.
-- **A modern React Native app**: Expo Router v6 file-based routing,
-  TypeScript throughout, Zustand for client state, Supabase for auth
-  and persistence (frontend side).
+  rewrite above, a pre-existing, differently-shaped `users` table in
+  the target database that had been silently halting every schema
+  migration after it, and (found only once the frontend actually
+  tried to call the API from a browser) a missing CORS layer — curl
+  and a native mobile app's fetch never enforce CORS, so it was
+  invisible until tested where it mattered. Each was diagnosed from
+  the actual error/log output, not guessed — see
+  `docs/GO_LEARNING_LOG.md` for the full sequence.
+- **A real checkout endpoint that doesn't trust the client**:
+  `POST /orders` accepts only a product ID and quantity per line item
+  — never a price. The price actually charged is looked up
+  server-side, at the moment of purchase, from the product's own
+  current record. Verified with a dedicated test proving a
+  maliciously low client-supplied price would be ignored even if one
+  were sent, and confirmed live against the production database (the
+  order row's stored price matches the product's real price, not
+  anything the request could have claimed).
+- **A fully reconnected React Native frontend**: real Supabase
+  session auth (replacing an earlier local mock), a typed API client
+  attaching the session's token to every request, and every screen —
+  product/category browsing, cart, checkout, order history and detail
+  — wired to the live API instead of static mock data. Verified by
+  actually driving the app in a browser against the live backend:
+  signing in, adding to cart, checking out, and confirming the
+  resulting order independently in the database — not just reading
+  the code. Two real, pre-existing bugs were found and fixed in the
+  process: a Rules-of-Hooks violation (a hook called after an early
+  conditional return — a real crash risk) and a session-storage
+  library with no web implementation, silently broken until this was
+  the first code path to actually exercise it.
 - **A documented learning process**: [`docs/GO_LEARNING_LOG.md`](docs/GO_LEARNING_LOG.md)
   is a running, lesson-by-lesson log of the Go backend build — what
   was taught, what was built, what bugs came up in review and why. It
@@ -124,13 +149,16 @@ Bazar/
 │   └── http/
 │       ├── categoryhttp/               # Handler + router for /categories
 │       ├── producthttp/                 # Handler + router for /products
-│       ├── orderhttp/                    # Handler + router for /orders
-│       ├── userhttp/                      # Handler + router for /users
-│       └── middleware/                     # Hand-rolled net/http middleware (logging, JWT auth)
-├── migrations/                  # Hand-written SQL schema migrations (golang-migrate)
-├── db/                           # Postgres connection pool setup (pgx)
+│       ├── orderhttp/                    # Handler + router for /orders, incl. POST checkout
+│       └── userhttp/                      # Handler + router for /users
+├── internal/platform/            # Cross-cutting infrastructure, not domain logic
+│   ├── database/                   # Postgres connection pool setup (pgx)
+│   ├── middleware/                  # Hand-rolled net/http middleware (logging, JWT auth, CORS)
+│   └── logger/                       # Centralized error logging
 ├── internal/config/                # Env-var config loading
+├── migrations/                  # Hand-written SQL schema migrations (golang-migrate)
 ├── cmd/server/                    # Entry point — wired up, runs a real server
+├── cmd/seed-temp/                  # Disposable script to seed real catalog data
 └── docs/GO_LEARNING_LOG.md          # Lesson-by-lesson build log
 ```
 
@@ -152,64 +180,60 @@ Each backend domain package follows the same shape:
 
 ## Current status
 
-**Done:**
-- Frontend: browsable end-to-end against local mock data (products,
-  categories, orders). Supabase auth code exists and is fully
-  functional but currently disconnected by design, so every screen is
-  reachable without signing in during frontend development.
-- Backend, all four domains (`product`, `category`, `order`, `user`):
-  domain types, `Repository`/`Service` layers, full fake-backed test
-  suites, real `pgx` `Repository` implementations validated against
-  live Postgres, and HTTP handlers + routers.
+**Done — the whole thing, backend and frontend, live in production:**
+- All four backend domains (`product`, `category`, `order`, `user`):
+  domain types, `Repository`/`Service` layers, fake-backed unit tests,
+  real `pgx` `Repository` implementations, and HTTP handlers/routers
+  — including `POST /orders` (checkout), which resolves each line
+  item's price server-side rather than trusting the client.
+- Handler-level tests (`httptest`, no real database needed) covering
+  `category`'s and `order`'s HTTP layer, including the authorization
+  matrix (owner vs. non-owner vs. nonexistent resource) and the
+  checkout endpoint's price-authority guarantee.
 - All SQL migrations (`categories`; `products` + `product_images`;
-  `app_users`; `orders` + `order_items`), applied and rolled back
-  cleanly against a real Postgres instance in both directions.
+  `app_users`; `orders` + `order_items`, including `status` and
+  `created_at`), applied and rolled back cleanly against both a local
+  and the real production Postgres instance.
 - JWT verification (`internal/auth`) against Supabase's real ES256/
   JWKS tokens, including the algorithm-confusion defense — verified
-  live against Supabase's real JWKS endpoint and a real signed token
-  (no committed unit tests for this package; correctness proven
-  against the real external system instead throughout this project).
-- Both hand-rolled middlewares (request logging, JWT auth-checking),
-  composed together in a deliberate order.
-- Env-var-based config loading (`internal/config`).
-- All four domains' routers composed onto one shared `http.ServeMux`.
-- `cmd/server/main.go` — fully wired: config → DB pool → all four
-  domains' repository/service/handler stacks → shared mux → middleware
-  chain → running `http.Server`. Live end-to-end proof: every domain
-  correctly returns `401` for a missing/invalid token and `200` for a
-  valid one, confirmed against a real running Postgres instance.
-
+  live against Supabase's real JWKS endpoint and a real signed token.
+- Three hand-rolled middlewares (request logging, JWT auth-checking,
+  CORS), composed in a deliberate, understood order — CORS outermost
+  of all (a preflight request never carries a token, so it has to run
+  before Auth), Auth next, Logging innermost.
+- `internal/platform/` — infrastructure code (`database`, `middleware`,
+  `logger`) separated from domain logic, its own package tree.
 - Authorization on `order.GetByID` and `user.GetByID` — ownership
-  checks between the verified user and the requested resource,
-  live-tested with two distinct users against a real running server,
-  for both domains.
-- CI (GitHub Actions: build/vet/gofmt/test on every push/PR), green
-  and running.
+  checks between the verified user and the requested resource, with a
+  deliberate `404` (not `403`) for both "doesn't exist" and "exists
+  but isn't yours," to avoid leaking which orders/users exist.
+- CI (GitHub Actions: build/vet/gofmt/test on every push/PR), green.
 - **Deployed and live**: [bazar-xxjl.onrender.com](https://bazar-xxjl.onrender.com),
-  on Render, backed by a real Supabase Postgres database. All four
-  domains verified end-to-end against the live URL with a real,
-  freshly-signed-in Supabase user's token — `200` on every route,
-  `401` with no token.
+  on Render, backed by a real Supabase Postgres database with real
+  seeded catalog data.
+- **The frontend is reconnected, end to end**: real Supabase session
+  auth, a typed API client, and every screen — browsing, cart,
+  checkout, order history/detail — wired to the live API. Proven by
+  actually driving the deployed app in a browser: signing in with a
+  real account, browsing real products, checking out, and confirming
+  the resulting order independently in the production database.
 
-**In progress:**
-- `internal/platform/{logger,database,middleware}` — optional
-  organizational polish (regrouping existing, already-working pieces),
-  not functionally required.
-- Authorization covers `order`/`user`; `category`/`product` have no
-  owner concept to check (not user-scoped resources), so there's
-  nothing analogous needed there.
-- No committed test coverage for HTTP handlers or `internal/auth` —
-  both verified live/via throwaway harnesses throughout instead of
-  permanent `_test.go` files.
+**Known, deliberate gaps, not oversights:**
+- No real image hosting — product photos are placeholder URLs
+  (picsum.photos), seeded via `cmd/seed-temp`; building real upload
+  storage was out of scope for this pass.
+- `product`/`user` have no HTTP-level test coverage yet (`category`
+  and `order` do) — `product` has no owner concept to test against
+  anyway; `user`'s is the same shape as `order`'s already-tested one,
+  just not mirrored into a test file yet.
+- The backend's JSON responses currently use Go's exported field
+  names as-is (`ID`, `PriceCents`, …) rather than conventional
+  camelCase `json` tags — the frontend's types match this deliberately
+  rather than silently diverging from what's actually deployed.
 
-**Not started:**
-- Reconnecting the frontend to the now-live backend instead of mock
-  data.
-
-In short: the backend's core roadmap is complete, live-proven, and
-now actually deployed — domain logic, persistence, HTTP, real
-Supabase auth verification, the middleware chain, authorization
-checks on every user-owned resource, CI, and a real running
-production URL are all in place. What's left is optional polish, a
-bit more test coverage, and the separate, larger effort of
-reconnecting the frontend.
+In short: this isn't a partial slice — domain logic, persistence,
+HTTP, real Supabase auth (both verifying incoming tokens and issuing
+them via the reconnected frontend), authorization, a checkout flow
+that doesn't trust the client, CI, and a live production deployment
+serving a real, working mobile-web app are all in place and verified
+against the real running system, not just written and assumed.
