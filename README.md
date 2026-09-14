@@ -1,124 +1,153 @@
-# MarketPlace
+# Bazar
 
-A modern, cross-platform mobile marketplace application built with React Native and Expo.
+[![Go](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/kalin-roman/Bazar/actions/workflows/go.yml)
 
-## Features
+A full-stack mobile marketplace: a Go + PostgreSQL backend (deployed,
+live) paired with a React Native / Expo frontend, connected end to
+end — real Supabase auth, real checkout, real data, no mocks.
 
-- **Product Catalog** - Browse products in a responsive two-column grid layout
-- **Product Details** - View detailed information for each product
-- **Shopping Cart** - Add, remove, and adjust product quantities with real-time totals
-- **Categories** - Browse products by category
-- **Order Tracking** - View order history with status indicators (Pending, Shipped, In Transit, Completed)
-- **User Authentication** - Secure sign-in/sign-up with email and password
-- **Secure Storage** - AES-256 encrypted session storage for enhanced security
+**Live API**: [bazar-xxjl.onrender.com](https://bazar-xxjl.onrender.com)
+(every route requires a valid Supabase token, so a bare visit
+correctly returns `401`, not a page).
 
-## Tech Stack
+For the full technical story — architecture decisions, what this
+project demonstrates, and an honest account of what's still open —
+see [`PORTFOLIO.md`](PORTFOLIO.md). This file covers how to actually
+run it.
 
-- **Framework:** [Expo](https://expo.dev) v54 with React Native 0.81
-- **Navigation:** [Expo Router](https://docs.expo.dev/router/introduction/) v6 (file-based routing)
-- **Backend:** [Supabase](https://supabase.com) (authentication & database)
-- **State Management:** [Zustand](https://zustand-demo.pmnd.rs/)
-- **Forms:** [React Hook Form](https://react-hook-form.com) + [Zod](https://zod.dev) validation
-- **UI Components:** [@rneui/themed](https://reactnativeelements.com/)
-- **Language:** TypeScript
+## Project layout
 
-## Prerequisites
+This is two projects in one repository:
 
-- [Node.js](https://nodejs.org) (v18 or later recommended)
-- [npm](https://www.npmjs.com/) or [yarn](https://yarnpkg.com/)
-- [Expo CLI](https://docs.expo.dev/get-started/installation/)
-- [Expo Go](https://expo.dev/client) app (for testing on physical devices)
-
-## Getting Started
-
-### 1. Clone the repository
-
-```bash
-git clone <repository-url>
-cd MarketPlace
+```
+Bazar/
+├── cmd/, internal/, migrations/, db/   # Go backend (this directory)
+├── web/                                 # React Native / Expo frontend
+├── PORTFOLIO.md                          # Full technical write-up
+└── docs/GO_LEARNING_LOG.md                # Lesson-by-lesson backend build log
 ```
 
-### 2. Install dependencies
+The backend and frontend are run and set up independently — pick the
+section below for what you're working on.
+
+---
+
+## Backend (Go)
+
+### Prerequisites
+
+- [Go](https://go.dev) 1.25+
+- [Docker](https://www.docker.com) (for a local Postgres instance)
+- [`golang-migrate`](https://github.com/golang-migrate/migrate) CLI:
+  `go install github.com/golang-migrate/migrate/v4/cmd/migrate@latest`
+
+### Run it locally
+
+1. **Start a local Postgres**, e.g.:
+   ```bash
+   docker run -d --name bazar-postgres -p 5431:5432 -e POSTGRES_PASSWORD=<your-password> postgres
+   ```
+
+2. **Apply migrations:**
+   ```bash
+   export DATABASE_URL="postgres://postgres:<your-password>@localhost:5431/postgres"
+   migrate -database "$DATABASE_URL?sslmode=disable" -path migrations up
+   ```
+
+3. **Set the remaining required environment variables:**
+   - `DATABASE_URL` — as above.
+   - `JWKS_URL` — a Supabase project's JWKS endpoint, e.g.
+     `https://<your-project-ref>.supabase.co/auth/v1/.well-known/jwks.json`.
+     The backend verifies incoming JWTs against this; it doesn't issue
+     tokens itself (that's Supabase Auth's job, wired up on the
+     frontend side).
+
+4. **Run the server:**
+   ```bash
+   go run ./cmd/server
+   ```
+   Listens on `:8080`. Every route requires `Authorization: Bearer
+   <token>` — a valid Supabase-issued JWT for the project named in
+   `JWKS_URL`.
+
+5. **(Optional) Seed some catalog data** to browse, since a fresh
+   database starts empty:
+   ```bash
+   go run ./cmd/seed-temp
+   ```
+
+### Tests
 
 ```bash
+go build ./...
+go vet ./...
+gofmt -l .        # should print nothing
+go test ./...
+```
+Same checks CI runs on every push (see the badge above).
+
+### Deploying
+
+The backend ships as a Docker image (`Dockerfile` at the repo root) —
+currently deployed on [Render](https://render.com). The binary always
+listens on `:8080` (hardcoded, not read from an env var); the only
+environment variables it actually requires are `DATABASE_URL` (a
+Postgres connection string — the deployed instance uses Supabase's
+session pooler) and `JWKS_URL`.
+
+---
+
+## Frontend (React Native / Expo)
+
+All frontend commands run from the `web/` directory.
+
+### Prerequisites
+
+- [Node.js](https://nodejs.org) (v18+)
+- [Expo Go](https://expo.dev/client) app, for testing on a physical
+  device (optional — simulators/web work too)
+
+### Setup
+
+```bash
+cd web
 npm install
 ```
+`npm install` needs the committed `.npmrc` (`legacy-peer-deps=true`)
+to succeed — it's already in place, no action needed, just don't
+remove it.
 
-### 3. Start the development server
+### Run it
 
 ```bash
-npm start
+npm start          # Expo dev server — press i/a/w, or scan the QR code
+npm run ios         # iOS simulator directly
+npm run android      # Android emulator directly
+npm run web           # Browser
 ```
 
-### 4. Run on a device or emulator
+By default this talks to the **live production API**
+(`bazar-xxjl.onrender.com`) and a **live Supabase project** — sign up
+or sign in with a real email/password on first launch. To point it at
+a different backend, change `API_BASE_URL` in `web/src/lib/api.ts`.
 
-- **iOS Simulator:** Press `i` in the terminal or run `npm run ios`
-- **Android Emulator:** Press `a` in the terminal or run `npm run android`
-- **Web Browser:** Press `w` in the terminal or run `npm run web`
-- **Expo Go:** Scan the QR code with the Expo Go app
+### Type-checking
 
-## Project Structure
-
+```bash
+npx tsc --noEmit
 ```
-MarketPlace/
-├── assets/                 # Images, icons, and static data
-│   ├── images/            # Product and category images
-│   ├── types/             # TypeScript type definitions
-│   ├── products.ts        # Product data
-│   ├── orders.ts          # Order data
-│   └── categories.tsx     # Category data
-├── src/
-│   ├── app/               # Expo Router screens (file-based routing)
-│   │   ├── (shop)/        # Main shop screens (home, orders)
-│   │   ├── product/       # Product detail screens
-│   │   ├── categories/    # Category screens
-│   │   ├── auth.tsx       # Authentication screen
-│   │   ├── cart.tsx       # Shopping cart screen
-│   │   └── _layout.tsx    # Root layout
-│   ├── components/        # Reusable UI components
-│   ├── lib/               # Utilities and configurations
-│   │   └── supabase.ts    # Supabase client setup
-│   ├── provider/          # React context providers
-│   │   └── auth-provider.tsx
-│   └── store/             # Zustand state stores
-│       └── cart-store.ts
-├── app.json               # Expo configuration
-├── package.json           # Dependencies and scripts
-└── tsconfig.json          # TypeScript configuration
-```
+No dedicated lint/test script is configured for the frontend.
 
-## Available Scripts
+---
 
-| Command | Description |
-|---------|-------------|
-| `npm start` | Start the Expo development server |
-| `npm run android` | Start on Android emulator |
-| `npm run ios` | Start on iOS simulator |
-| `npm run web` | Start in web browser |
+## Learning context
 
-## Environment Setup
-
-The app uses Supabase for authentication and database. The Supabase client is configured in `src/lib/supabase.ts`.
-
-For production deployments, you should:
-1. Create your own Supabase project at [supabase.com](https://supabase.com)
-2. Update the `supabaseUrl` and `supabaseAnonKey` in `src/lib/supabase.ts`
-3. Set up the required database tables (users, products, orders)
-
-## Security Features
-
-- Session tokens are encrypted using AES-256 before storage
-- Encryption keys are stored in Expo SecureStore
-- Encrypted data is stored in AsyncStorage
-- Auto-refresh tokens for seamless authentication
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+This backend was built by hand, from scratch, as a structured project
+to learn Go and backend engineering practice — not generated in one
+pass. [`docs/GO_LEARNING_LOG.md`](docs/GO_LEARNING_LOG.md) is the
+real, session-by-session record of that process: what was taught,
+what broke, and why — kept up throughout rather than written after
+the fact.
 
 ## License
 
